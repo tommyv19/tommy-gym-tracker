@@ -85,6 +85,7 @@ h3 { font-size: 15px; margin: 0; }
 .chip { background: var(--card-2); border: 1px solid var(--border); border-radius: var(--r-pill);
   padding: 7px 13px; font-size: 13px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
 .chip.on { color: var(--text); border-color: var(--text); }
+.chip.rec { border-color: var(--ok); color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
 .scroller { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
 .scroller::-webkit-scrollbar { display: none; }
 

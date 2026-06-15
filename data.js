@@ -534,6 +534,26 @@ const DEFAULT_PLAN = {
   ]
 };
 
+/* ---------- Riscaldamento ---------- */
+const SPIN_WARMUP = { name:'🚴 Spin Bike Yesoul', detail:'5–8 min · resistenza bassa→media, cadenza 80–100 rpm. Aumenta leggermente negli ultimi 60 secondi.' };
+const WARMUP_GENERAL = [
+  {name:'Jumping jacks', detail:'30–45 secondi'},
+  {name:'Circonduzioni delle braccia', detail:'30s avanti + 30s indietro'},
+  {name:'Circonduzioni delle anche', detail:'30 secondi per lato'},
+  {name:'Torsioni del busto', detail:'20 ripetizioni controllate'},
+  {name:'Cat-cow (gatto-mucca)', detail:'8–10 ripetizioni col respiro'}
+];
+const WARMUPS = {
+  petto: [{name:'Push-up lenti',detail:'10 ripetizioni'},{name:'Band/asciugamano pull-apart',detail:'15 ripetizioni'},{name:'Circonduzioni spalle',detail:'20 ripetizioni'}],
+  spalle:[{name:'Alzate laterali senza peso',detail:'20 ripetizioni'},{name:'Band pull-apart',detail:'15 ripetizioni'},{name:'Rotazioni esterne con elastico',detail:'12 per lato'}],
+  tricipiti:[{name:'Push-up lenti',detail:'10 ripetizioni'},{name:'Estensioni a vuoto',detail:'15 ripetizioni'},{name:'Circonduzioni spalle',detail:'20 ripetizioni'}],
+  schiena:[{name:'Scapular pull (o rematori a vuoto)',detail:'15 ripetizioni'},{name:'Cat-cow',detail:'10 ripetizioni'},{name:'Good morning a corpo libero',detail:'12 ripetizioni'}],
+  bicipiti:[{name:'Circonduzioni braccia indietro',detail:'30 secondi'},{name:'Curl a vuoto',detail:'15 ripetizioni'},{name:'Scapular pull',detail:'12 ripetizioni'}],
+  gambe:[{name:'Squat a corpo libero',detail:'15 ripetizioni'},{name:'Affondi dinamici',detail:'10 per gamba'},{name:'Slanci gambe avanti/laterali',detail:'12 per lato'},{name:'Ponte glutei',detail:'15 ripetizioni'}],
+  glutei:[{name:'Ponte glutei',detail:'15 ripetizioni'},{name:'Slanci gamba indietro',detail:'12 per lato'},{name:'Squat a corpo libero',detail:'15 ripetizioni'}],
+  core:[{name:'Plank',detail:'20–30 secondi'},{name:'Dead bug lento',detail:'10 per lato'},{name:'Bird-dog',detail:'10 per lato'}]
+};
+
 const DAY_COLORS = { A:'var(--A)', B:'var(--B)', C:'var(--C)', D:'var(--D)' };
 const DAY_HEX = { A:'#E8472A', B:'#1A6FBF', C:'#2EAD6B', D:'#8B2FC9' };
 

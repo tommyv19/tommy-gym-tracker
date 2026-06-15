@@ -26,8 +26,17 @@ function settings(){
     userName:'Tommy', email:'tommy190594@gmail.com',
     planStartDate: today(), lastPlanChange: today(),
     emailjsServiceId:'', emailjsTemplateId:'', emailjsUserId:'',
-    claudeApiKey:'', claudeModel:'claude-sonnet-4-6', notifyWeeks:6
+    claudeApiKey:'', claudeModel:'claude-sonnet-4-6', notifyWeeks:6,
+    trainingDays:[1,2,4,6] // Lun, Mar, Gio, Sab (0=Dom ... 6=Sab)
   });
+}
+function getTrainingDays(){ const t=settings().trainingDays; return Array.isArray(t)?t:[1,2,4,6]; }
+const WD_SHORT = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+const WD_LONG  = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+function nextTrainingDayName(){
+  const td=getTrainingDays(); const now=new Date().getDay();
+  for(let i=1;i<=7;i++){ const d=(now+i)%7; if(td.includes(d)) return i===1?'domani ('+WD_LONG[d]+')':WD_LONG[d]; }
+  return '—';
 }
 function saveSettings(s){ DB.set('settings', s); }
 
@@ -155,6 +164,21 @@ $$('#tabbar button').forEach(b => b.addEventListener('click', ()=>go(b.dataset.t
    ============================================================ */
 let curDayIdx = 0;
 
+// Smart rotation: propose the day AFTER the last completed workout (A→B→C→D→A).
+function recommendedDayIdx(){
+  const plan = activePlan();
+  // if there's an unfinished session today, stick to that day
+  const s = DB.get('currentSession', null);
+  if (s && s.date === today()) return s.dayIdx;
+  const log = DB.get('workoutLog', {});
+  const dates = Object.keys(log).sort(); // ascending by date string
+  for (let i = dates.length-1; i >= 0; i--){
+    const idx = plan.days.findIndex(d => d.type === log[dates[i]].dayType);
+    if (idx >= 0) return (idx+1) % plan.days.length;
+  }
+  return 0; // no history → Giorno A
+}
+
 function getSession(){ return DB.get('currentSession', null); }
 function ensureSession(dayIdx){
   const plan = activePlan(); const day = plan.days[dayIdx];
@@ -173,22 +197,59 @@ function saveSession(s){ DB.set('currentSession', s); }
 VIEWS.scheda = function(){
   const plan = activePlan(); const day = plan.days[curDayIdx];
   const s = ensureSession(curDayIdx);
-  const totalEx = day.exercises.length;
-  const doneEx = Object.values(s.exercises).filter(x=>x.completed).length;
+  const express = DB.get('expressMode', false);
+  const exList = express ? day.exercises.slice(0,4) : day.exercises;
+  const totalEx = exList.length;
+  const doneEx = exList.filter(e=> s.exercises[e.exId] && s.exercises[e.exId].completed).length;
   const pct = totalEx ? Math.round(doneEx/totalEx*100) : 0;
 
+  const recIdx = recommendedDayIdx();
+  const recDay = plan.days[recIdx];
+  const doneToday = DB.get('workoutLog', {})[today()];
+  const todayStr = new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'});
+  const todayCap = todayStr.charAt(0).toUpperCase()+todayStr.slice(1);
+
   let h = `<div class="topbar"><div>
-      <h1>Scheda</h1>
-      <div class="sub">${esc(plan.days[curDayIdx].name)} · iniziata ${fmtDate(plan.startDate)}</div>
+      <h1>Ciao ${esc(settings().userName)} 💪</h1>
+      <div class="sub">${todayCap}</div>
     </div></div>`;
+
+  // smart recommendation banner
+  const isTrainingDay = getTrainingDays().includes(new Date().getDay());
+  if (doneToday){
+    h += `<div class="card" style="border-color:var(--ok)">
+      <div class="row" style="gap:10px"><span style="font-size:22px">✅</span>
+      <div><b>Oggi hai completato il Giorno ${doneToday.dayType}</b>
+      <div class="tiny muted">Prossimo consigliato: Giorno ${recDay.type} — ${esc(recDay.name)} · ${nextTrainingDayName()}</div></div></div></div>`;
+  } else if (!isTrainingDay){
+    h += `<div class="card">
+      <div class="row" style="gap:10px"><span style="font-size:22px">🛌</span>
+      <div><b>Oggi è giorno di riposo</b>
+      <div class="tiny muted">Prossimo allenamento: ${nextTrainingDayName()} · Giorno ${recDay.type}. Se vuoi allenarti comunque, è già pronto.</div></div></div></div>`;
+  } else {
+    h += `<div class="card acc-${recDay.type}" style="border-color:${DAY_HEX[recDay.type]}">
+      <div class="row" style="gap:10px"><span class="dot bg-${recDay.type}" style="width:14px;height:14px"></span>
+      <div><b style="color:${DAY_HEX[recDay.type]}">Oggi tocca al Giorno ${recDay.type} 💪</b>
+      <div class="tiny muted">${esc(recDay.name)} · è uno dei tuoi giorni di allenamento</div></div></div></div>`;
+  }
 
   // day selector
   h += `<div class="scroller" style="margin-bottom:12px">`;
   plan.days.forEach((d,i)=>{
-    h += `<button class="chip ${i===curDayIdx?'on':''}" onclick="selectDay(${i})">
-      <span class="dot bg-${d.type}"></span> Giorno ${d.type}</button>`;
+    const isRec = i===recIdx && !doneToday;
+    h += `<button class="chip ${i===curDayIdx?'on':''} ${isRec?'rec':''}" onclick="selectDay(${i})">
+      <span class="dot bg-${d.type}"></span> Giorno ${d.type}${isRec?' ★':''}</button>`;
   });
   h += `</div>`;
+
+  // time mode selector
+  h += `<div class="row" style="gap:8px;margin-bottom:12px">
+    <button class="chip ${!express?'on':''}" style="flex:1;text-align:center;justify-content:center" onclick="setTime(false)">⏱ Completo · ~60'</button>
+    <button class="chip ${express?'on':''}" style="flex:1;text-align:center;justify-content:center" onclick="setTime(true)">⚡ Express · ~30'</button></div>`;
+  if (express) h += `<div class="notice">⚡ Modalità Express: solo i ${exList.length} esercizi principali, fai 2–3 serie ciascuno. Riscaldamento breve.</div>`;
+
+  // warm-up
+  h += renderWarmup(day, express);
 
   // progress header
   h += `<div class="card"><div class="row between" style="margin-bottom:8px">
@@ -197,11 +258,10 @@ VIEWS.scheda = function(){
       <div class="progbar"><i style="width:${pct}%"></i></div></div>`;
 
   // exercise cards
-  day.exercises.forEach((e,i)=>{
+  exList.forEach((e,i)=>{
     const ex = EX_BY_ID[e.exId]; if (!ex) return;
     const st = s.exercises[e.exId];
     h += renderExCard(ex, e, st, i);
-    // stretching auto-suggest at end of last exercise of the muscle group
   });
 
   // stretching suggestion
@@ -260,6 +320,33 @@ function renderSets(exId, st){
     <button class="btn sm" onclick="repeatAll('${exId}')">🔄 Ripeti tutte</button></div>`;
   return h;
 }
+
+function renderWarmup(day, express){
+  const specific = WARMUPS[day.muscleGroup] || [];
+  const gen = express ? WARMUP_GENERAL.slice(0,3) : WARMUP_GENERAL;
+  const spinTime = express ? '3–4 min' : SPIN_WARMUP.detail;
+  const open = DB.get('warmupOpen', true);
+  let items = `<div class="row" style="gap:8px;align-items:flex-start;margin-bottom:8px">
+      <span style="font-size:18px">🚴</span><div><b>${esc(SPIN_WARMUP.name)}</b>
+      <div class="tiny muted">${express?'3–4 min · cadenza progressiva':esc(SPIN_WARMUP.detail)}</div></div></div>`;
+  const li = (a)=>`<div class="row" style="gap:8px;align-items:flex-start;margin-bottom:6px">
+      <span class="dot" style="background:var(--warn);margin-top:6px"></span>
+      <div class="small"><b>${esc(a.name)}</b> <span class="muted">— ${esc(a.detail)}</span></div></div>`;
+  items += `<div class="tiny muted" style="margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em">Mobilità generale</div>`;
+  items += gen.map(li).join('');
+  if (specific.length){
+    items += `<div class="tiny muted" style="margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em">Attivazione ${esc(day.name)}</div>`;
+    items += specific.map(li).join('');
+  }
+  return `<div class="card ex-card ${open?'open':''}" id="warmup-card">
+    <div class="ex-head" onclick="toggleWarmup()">
+      <span style="font-size:18px">🔥</span>
+      <div><h3>Riscaldamento</h3><div class="tiny muted">${express?'~5 min':'~8–10 min'} · prepara muscoli e articolazioni</div></div>
+      <span class="chev">›</span></div>
+    <div class="ex-body">${items}</div></div>`;
+}
+window.toggleWarmup = ()=>{ const v=!DB.get('warmupOpen',true); DB.set('warmupOpen',v); $('#warmup-card').classList.toggle('open',v); };
+window.setTime = (express)=>{ DB.set('expressMode', express); VIEWS.scheda(); startAnimations(); };
 
 window.selectDay = (i)=>{ curDayIdx=i; VIEWS.scheda(); };
 window.toggleEx = (id)=>{ const s=getSession(); s.exercises[id]._open=!s.exercises[id]._open; saveSession(s);
@@ -585,6 +672,7 @@ VIEWS.progressi = function(){
       <div><label class="fld">Cosce (cm)</label><input type="number" id="m-thighs" value="${last?last.thighs:''}"></div>
     </div>
     <button class="btn primary block" style="margin-top:12px" onclick="saveMetric()">💾 Salva misurazione di oggi</button>
+    <button class="btn ghost block sm" style="margin-top:8px" onclick="healthSyncInfo()">📲 Sincronizza da Apple Salute / Renpho</button>
   </div>`;
 
   // charts
@@ -619,6 +707,25 @@ VIEWS.progressi = function(){
   $('#view-progressi').innerHTML = h;
 };
 window.setPeriod = (p)=>{ metricPeriod=p; VIEWS.progressi(); };
+
+window.healthSyncInfo = function(){
+  const base = location.origin + location.pathname;
+  const example = base + '?weight=78.5&bf=22&muscle=58&water=55';
+  openSheet(`<h3>📲 Sincronizza con Apple Salute / Renpho</h3>
+    <p class="small">Renpho non ha un collegamento diretto per i siti web, ma su iPhone si può automatizzare con l'app <b>Scorciatoie</b> (Shortcuts), che legge i dati da <b>Apple Salute</b> dove Renpho li sincronizza.</p>
+    <ol class="small" style="padding-left:18px;line-height:1.6">
+      <li>Nell'app <b>Renpho</b>: Profilo → impostazioni → attiva la sincronizzazione con <b>Apple Salute</b> (peso, massa grassa, ecc.).</li>
+      <li>Apri <b>Scorciatoie</b> → crea una scorciatoia con i blocchi: <i>"Trova campioni di salute"</i> (Peso, ultimo valore) → <i>"Trova campioni di salute"</i> (Percentuale massa grassa) → <i>"Apri URL"</i>.</li>
+      <li>Nell'URL incolla questo schema, sostituendo i numeri con le variabili lette da Salute:</li>
+    </ol>
+    <div class="card" style="word-break:break-all"><code class="small">${esc(base)}?weight=PESO&bf=GRASSO&muscle=MASSA&water=ACQUA</code></div>
+    <p class="tiny muted">Parametri accettati: weight, bf, muscle, water, waist, chest, arms, thighs.</p>
+    <button class="btn block sm" onclick="copyText('${esc(base)}?weight=&bf=&muscle=&water=')">📋 Copia lo schema URL</button>
+    <button class="btn block sm" style="margin-top:8px" onclick="copyText('${esc(example)}')">📋 Copia un esempio compilato</button>
+    <p class="small" style="margin-top:12px">In <b>Automazione</b> puoi farla partire ogni mattina: leggerà i dati e li salverà qui in automatico. Aprendo quell'indirizzo l'app mostra "Dati salute importati ✅".</p>
+    <p class="tiny muted">Nota: questo è il metodo affidabile per una PWA; un collegamento "nativo" diretto richiederebbe un'app dell'App Store.</p>`);
+};
+window.copyText = function(t){ try{ navigator.clipboard.writeText(t); toast('Copiato'); }catch(e){ toast('Copia manuale: '+t.slice(0,40)+'…'); } };
 
 window.saveMetric = function(){
   const m = { date:today(),
@@ -794,6 +901,15 @@ VIEWS.impostazioni = function(){
     <label class="fld">Avvisa cambio scheda dopo (settimane)</label><input type="number" id="s-weeks" value="${s.notifyWeeks}">
     <button class="btn primary block" style="margin-top:12px" onclick="saveGeneral()">Salva</button></div>`;
 
+  h+=`<h2>📆 Settimana-tipo & promemoria</h2><div class="card">
+    <div class="tiny muted" style="margin-bottom:8px">Scegli i giorni in cui ti alleni. L'app ti ricorderà e aprirà la scheda giusta in quei giorni.</div>
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      ${[1,2,3,4,5,6,0].map(d=>`<button class="chip ${getTrainingDays().includes(d)?'on':''}" onclick="toggleTD(${d})">${WD_SHORT[d]}</button>`).join('')}
+    </div>
+    <div class="small muted" style="margin-top:10px">Consigliato per iniziare: <b>4 volte a settimana</b> (es. Lun · Mar · Gio · Sab).</div>
+    <button class="btn block sm" style="margin-top:10px" onclick="setTrainingDays([1,2,4,6])">Usa Lun · Mar · Gio · Sab</button>
+  </div>`;
+
   h+=`<h2>🤖 Claude AI</h2><div class="card">
     <label class="fld">API Key (sk-ant-...)</label><input id="s-key" type="password" value="${esc(s.claudeApiKey)}">
     <label class="fld">Modello</label><input id="s-model" value="${esc(s.claudeModel)}">
@@ -818,6 +934,9 @@ VIEWS.impostazioni = function(){
   h+=`<p class="tiny muted center" style="margin-top:16px">GymTracker v1.0 · ${EXERCISES.length} esercizi · PWA</p>`;
   $('#view-impostazioni').innerHTML=h;
 };
+window.toggleTD=function(d){ const s=settings(); let t=Array.isArray(s.trainingDays)?s.trainingDays.slice():[1,2,4,6];
+  if(t.includes(d)) t=t.filter(x=>x!==d); else t.push(d); t.sort(); s.trainingDays=t; saveSettings(s); VIEWS.impostazioni(); };
+window.setTrainingDays=function(arr){ const s=settings(); s.trainingDays=arr.slice(); saveSettings(s); toast('Settimana impostata'); VIEWS.impostazioni(); };
 window.saveGeneral=function(){ const s=settings(); s.userName=$('#s-name').value; s.email=$('#s-email').value;
   s.planStartDate=$('#s-start').value; s.notifyWeeks=parseInt($('#s-weeks').value)||6; saveSettings(s); toast('Salvato'); };
 window.saveAI=function(){ const s=settings(); s.claudeApiKey=$('#s-key').value.trim(); s.claudeModel=$('#s-model').value.trim()||'claude-sonnet-4-6'; saveSettings(s); toast('AI salvato'); };
@@ -899,6 +1018,33 @@ function checkStagnation(){
     }
   }
 }
+function trainingReminder(){
+  if(!('Notification' in window) || Notification.permission!=='granted') return;
+  if(!getTrainingDays().includes(new Date().getDay())) return;
+  if(DB.get('workoutLog',{})[today()]) return;            // già allenato oggi
+  if(DB.get('trainReminded',null)===today()) return;      // già avvisato oggi
+  DB.set('trainReminded', today());
+  const rec=activePlan().days[recommendedDayIdx()];
+  navigator.serviceWorker?.ready.then(reg=>reg.showNotification('🏋️ GymTracker',
+    {body:`Oggi tocca al Giorno ${rec.type} — ${rec.name}. Forza Tommy! 💪`, icon:'icons/icon-192.png'})).catch(()=>{});
+}
+
+// Importa misurazioni passate via URL (?weight=78&bf=22&muscle=58...) — usato dalla Scorciatoia iOS che legge Apple Salute/Renpho.
+function ingestHealthParams(){
+  let qs; try{ qs=new URLSearchParams(location.search); }catch(e){ return; }
+  if(![...qs.keys()].length) return;
+  const map={weight:'weight',peso:'weight',bf:'bodyFat',bodyfat:'bodyFat',grasso:'bodyFat',muscle:'muscleMass',
+    massa:'muscleMass',water:'water',acqua:'water',waist:'waist',vita:'waist',chest:'chest',petto:'chest',
+    arms:'arms',braccia:'arms',thighs:'thighs',cosce:'thighs'};
+  const arr=DB.get('bodyMetrics',[]); const i=arr.findIndex(x=>x.date===today());
+  let m = i>=0 ? Object.assign({},arr[i]) : {date:today()}; let got=false;
+  for(const [k,v] of qs.entries()){ const f=map[k.toLowerCase()]; const val=parseFloat(String(v).replace(',','.'));
+    if(f && !isNaN(val)){ m[f]=val; got=true; } }
+  if(got){ if(i>=0)arr[i]=m; else arr.push(m); arr.sort((a,b)=>a.date.localeCompare(b.date)); DB.set('bodyMetrics',arr);
+    try{ history.replaceState(null,'',location.pathname); }catch(e){}
+    setTimeout(()=>toast('Dati salute importati ✅'),700); }
+}
+
 function autoCheckPlanAge(){
   const w=weeksSincePlanChange();
   if(w>=settings().notifyWeeks){
@@ -917,10 +1063,13 @@ function autoCheckPlanAge(){
 function init(){
   // register SW
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+  ingestHealthParams(); // importa dati salute passati via URL (Scorciatoia iOS)
   Media.load().then(()=>{ // re-render current view once images resolve
     const act=$('#tabbar button.active'); if(act) go(act.dataset.tab);
   });
+  curDayIdx = recommendedDayIdx(); // open the smart-recommended day
   go('scheda');
   autoCheckPlanAge();
+  trainingReminder();
 }
 init();
