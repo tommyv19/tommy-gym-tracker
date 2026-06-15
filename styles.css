@@ -194,6 +194,42 @@ h3 { font-size: 15px; margin: 0; }
 .libcard .nm { font-size: 13px; font-weight: 700; margin-top: 6px; }
 .libcard .cat { font-size: 11px; color: var(--text-2); }
 
+/* ===== Tile grid (entrata a icone) ===== */
+.tilegrid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+.tile { background:var(--card); border:1px solid var(--border); border-radius:18px; padding:16px 6px; text-align:center; }
+.tile:active { transform:scale(.97); }
+.tile .ic { font-size:26px; line-height:1; }
+.tile .tl { font-size:12px; font-weight:700; margin-top:7px; }
+.tile.accent { background:var(--A); border-color:var(--A); color:#fff; }
+
+/* ===== Guided player ===== */
+.player { position:fixed; inset:0; z-index:300; background:var(--bg); display:flex; flex-direction:column;
+  padding-top:calc(var(--sat) + 6px); padding-bottom:calc(var(--sab) + 12px); overflow-y:auto; }
+.player.hidden { display:none; }
+.pl-top { display:flex; align-items:center; gap:10px; padding:6px 14px; position:sticky; top:0; background:var(--bg); z-index:2; }
+.pl-top .x { width:34px; height:34px; border-radius:50%; background:var(--card-2); color:var(--text); font-size:15px; flex:none; }
+.pl-dots { flex:1; display:flex; gap:4px; }
+.pl-dots i { flex:1; height:4px; border-radius:2px; background:var(--border); }
+.pl-dots i.done { background:var(--ok); }
+.pl-dots i.cur { background:var(--text); }
+.pl-media { padding:0 14px; }
+.pl-media .frames { gap:0; }
+.pl-media .frame { background:var(--card); }
+.pl-media .anim-img { height:280px; object-fit:contain; background:var(--card); }
+.pl-body { padding:10px 16px 30px; }
+.pl-actions { display:flex; gap:8px; margin-top:16px; position:sticky; bottom:0; padding:10px 0; background:linear-gradient(transparent, var(--bg) 30%); }
+.pl-actions .btn { flex:1; text-align:center; justify-content:center; }
+.btn[disabled] { opacity:.4; }
+
+.rest { position:fixed; inset:0; z-index:310; background:var(--B); color:#fff;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; }
+.rest.hidden { display:none; }
+.rest .lbl { font-size:18px; font-weight:800; letter-spacing:.12em; opacity:.9; }
+.rest .t { font-size:72px; font-weight:800; line-height:1; }
+.rest .row { gap:14px; }
+.rest .btn { min-width:130px; text-align:center; justify-content:center; background:rgba(255,255,255,.18); color:#fff; border-color:transparent; }
+.rest .btn.primary { background:#fff; color:var(--B); }
+
 /* ===== Muscle map ===== */
 .musclemap svg { width:100%; max-width:300px; height:auto; display:block; margin:0 auto; }
 

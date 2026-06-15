@@ -279,8 +279,14 @@ VIEWS.scheda = function(){
     <button class="chip ${express?'on':''}" style="flex:1;text-align:center;justify-content:center" onclick="setTime(true)">⚡ Express · ~30'</button></div>`;
   if (express) h += `<div class="notice">⚡ Modalità Express: solo i ${exList.length} esercizi principali, fai 2–3 serie ciascuno. Riscaldamento breve.</div>`;
 
-  // warm-up
-  h += renderWarmup(day, express);
+  // icon tiles (entrata stile home iPhone)
+  const stretchId = suggestStretch(day);
+  h += `<div class="tilegrid">
+    <div class="tile" onclick="warmupSheet()"><div class="ic">🔥</div><div class="tl">Riscaldamento</div></div>
+    <div class="tile accent" onclick="startGuided()"><div class="ic">▶️</div><div class="tl">Allenamento</div></div>
+    <div class="tile" onclick="openExercise('${stretchId}')"><div class="ic">🧘</div><div class="tl">Stretching</div></div>
+  </div>`;
+  h += `<button class="btn primary block" style="margin-bottom:14px" onclick="startGuided()">▶ Inizia allenamento guidato</button>`;
 
   // progress header
   h += `<div class="card"><div class="row between" style="margin-bottom:8px">
@@ -288,23 +294,13 @@ VIEWS.scheda = function(){
       <span class="pill">${doneEx}/${totalEx} esercizi</span></div>
       <div class="progbar"><i style="width:${pct}%"></i></div></div>`;
 
-  // exercise cards
+  // exercise list (modifica manuale)
+  h += `<h2>Esercizi <span class="tiny muted" style="font-weight:400">· tocca per dettagli e log manuale</span></h2>`;
   exList.forEach((e,i)=>{
     const ex = EX_BY_ID[e.exId]; if (!ex) return;
     const st = s.exercises[e.exId];
     h += renderExCard(ex, e, st, i);
   });
-
-  // stretching suggestion
-  const stretchId = suggestStretch(day);
-  if (stretchId){
-    const sx = EX_BY_ID[stretchId];
-    h += `<h2>🧘 Stretching consigliato</h2>`;
-    h += `<div class="card"><div class="ex-head" onclick="openExercise('${stretchId}')">
-      <span class="dot" style="background:var(--C)"></span>
-      <div><h3>${esc(sx.name)}</h3><div class="tiny muted">Per ${esc(day.name)}</div></div>
-      <span class="chev">›</span></div></div>`;
-  }
 
   h += `<button class="btn ok block" style="margin:8px 0 4px" onclick="finishWorkout()">✅ TERMINA ALLENAMENTO</button>`;
   h += `<button class="btn ghost block small" onclick="if(confirm('Azzerare la sessione di oggi?')){DB.del('currentSession');VIEWS.scheda();}">Reset sessione</button>`;
@@ -390,6 +386,10 @@ function renderWarmup(day, express){
   return h;
 }
 window.toggleGeneric = (id)=>{ const el=$('#'+id); if(el){ el.classList.toggle('open'); startAnimations(); } };
+window.warmupSheet = function(){
+  const day=activePlan().days[curDayIdx]; const express=DB.get('expressMode',false);
+  openSheet(renderWarmup(day, express)); startAnimations();
+};
 window.setTime = (express)=>{ DB.set('expressMode', express); VIEWS.scheda(); startAnimations(); };
 
 function renderWeekStrip(){
@@ -527,6 +527,99 @@ function finishWorkout(){
   VIEWS.scheda();
 }
 window.finishWorkout = finishWorkout;
+
+/* ============================================================
+   Guided player — un esercizio alla volta, in sequenza
+   ============================================================ */
+let guided = { seq:[], i:0, targets:{} };
+const REST_DEFAULT = 90;
+
+window.startGuided = function(){
+  const plan=activePlan(); const day=plan.days[curDayIdx];
+  const express = DB.get('expressMode', false);
+  const exList = express ? day.exercises.slice(0,4) : day.exercises;
+  if(!exList.length){ toast('Nessun esercizio'); return; }
+  ensureSession(curDayIdx);
+  guided = { seq: exList.map(e=>e.exId), i:0, targets:{} };
+  exList.forEach(e=> guided.targets[e.exId]=e.sets);
+  $('#player').classList.remove('hidden');
+  document.body.style.overflow='hidden';
+  renderPlayer();
+};
+window.closePlayer = function(){
+  $('#player').classList.add('hidden'); $('#rest').classList.add('hidden');
+  clearInterval(_rest); document.body.style.overflow=''; VIEWS.scheda();
+};
+function planEntry(exId){ return (activePlan().days[curDayIdx].exercises.find(e=>e.exId===exId))||{}; }
+
+function renderPlayer(){
+  const exId=guided.seq[guided.i]; const ex=EX_BY_ID[exId];
+  const s=getSession(); const st=s.exercises[exId];
+  const target=guided.targets[exId]||3;
+  const done=st.sets.filter(x=>x.done).length;
+  const minSets=Math.min(target,2);
+  const canNext=done>=minSets;
+  const last=guided.i===guided.seq.length-1;
+  let h=`<div class="pl-top">
+    <button class="x" onclick="closePlayer()">✕</button>
+    <div class="pl-dots">${guided.seq.map((_,k)=>`<i class="${k<guided.i?'done':''} ${k===guided.i?'cur':''}"></i>`).join('')}</div></div>`;
+  h+=`<div class="pl-media">${exerciseMedia(ex,'anim')}</div>`;
+  h+=`<div class="pl-body">
+    <div class="row between"><h2 style="margin:0;font-size:19px">${esc(ex.name)}</h2><span class="pill">${guided.i+1}/${guided.seq.length}</span></div>
+    <div class="tiny muted" style="margin:3px 0 12px">Obiettivo: ${target} serie × ${esc(planEntry(exId).reps||'')} · servono almeno ${minSets} serie per proseguire</div>
+    <div class="sets" id="plsets">${playerSets(exId,st)}</div>
+    ${muscleMapBlock(ex)}
+    <div class="tech"><b class="small">Tecnica</b><ol>${ex.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>
+    <div class="pl-actions">
+      ${guided.i>0?`<button class="btn ghost" style="flex:.6" onclick="playerPrev()">‹</button>`:''}
+      <button class="btn ghost" onclick="playerSkip()">Salta</button>
+      <button class="btn ${canNext?'primary':''}" ${canNext?'':'disabled'} onclick="playerNext()">${last?'🏁 Termina':'Prossimo ›'}</button>
+    </div></div>`;
+  $('#player').innerHTML=h; $('#player').scrollTop=0; startAnimations();
+}
+function playerSets(exId, st){
+  let h='';
+  st.sets.forEach((set,i)=>{
+    h+=`<div class="set-row ${set.done?'done':''}">
+      <span class="sn">SERIE ${i+1}</span>
+      <input type="number" inputmode="decimal" placeholder="kg" value="${set.kg}" onchange="playerSetVal('${exId}',${i},'kg',this.value)">
+      <span class="x">×</span>
+      <input type="number" inputmode="numeric" placeholder="rip" value="${set.reps}" onchange="playerSetVal('${exId}',${i},'reps',this.value)">
+      ${i>0?`<button class="btn sm copy" onclick="playerCopy('${exId}',${i})">↑</button>`:''}
+      <button class="chk" onclick="playerToggle('${exId}',${i})">${set.done?'✓':''}</button></div>`;
+  });
+  h+=`<div class="set-actions"><button class="btn sm" onclick="playerAdd('${exId}')">+ Serie</button>
+    <button class="btn sm" onclick="playerRepeat('${exId}')">🔄 Ripeti</button></div>`;
+  return h;
+}
+window.playerSetVal=(id,i,f,v)=>{ const s=getSession(); s.exercises[id].sets[i][f]=v; saveSession(s); };
+window.playerCopy=(id,i)=>{ const s=getSession(); const p=s.exercises[id].sets[i-1]; const set=s.exercises[id].sets[i];
+  set.kg=p.kg; set.reps=p.reps; saveSession(s); $('#plsets').innerHTML=playerSets(id,s.exercises[id]); };
+window.playerRepeat=(id)=>{ const s=getSession(); const f=s.exercises[id].sets[0];
+  s.exercises[id].sets.forEach((set,i)=>{ if(i>0){set.kg=f.kg; set.reps=f.reps;} }); saveSession(s); $('#plsets').innerHTML=playerSets(id,s.exercises[id]); };
+window.playerAdd=(id)=>{ const s=getSession(); s.exercises[id].sets.push({kg:'',reps:'',done:false}); saveSession(s); $('#plsets').innerHTML=playerSets(id,s.exercises[id]); };
+window.playerToggle=(id,i)=>{ const s=getSession(); const set=s.exercises[id].sets[i]; set.done=!set.done;
+  const ex=s.exercises[id]; ex.completed=ex.sets.every(x=>x.done); saveSession(s);
+  renderPlayer();
+  if(set.done && i < s.exercises[id].sets.length-1) startRest(REST_DEFAULT);
+};
+window.playerNext=()=>{ if(guided.i>=guided.seq.length-1){ finishWorkout(); $('#player').classList.add('hidden'); document.body.style.overflow=''; return; } guided.i++; renderPlayer(); };
+window.playerPrev=()=>{ if(guided.i>0){ guided.i--; renderPlayer(); } };
+window.playerSkip=()=>{ if(guided.i>=guided.seq.length-1){ finishWorkout(); $('#player').classList.add('hidden'); document.body.style.overflow=''; return; } guided.i++; renderPlayer(); };
+
+/* rest timer */
+let _rest=null, restT=0;
+function tickRest(){ const e=$('#rest .t'); if(e) e.textContent='00:'+String(Math.max(0,restT)).padStart(2,'0'); }
+function startRest(sec){ restT=sec; const r=$('#rest');
+  r.innerHTML=`<div class="lbl">RIPOSO</div><div class="t">00:${String(sec).padStart(2,'0')}</div>
+    <div class="row"><button class="btn" onclick="addRest(20)">+20s</button>
+    <button class="btn primary" onclick="skipRest()">SALTA</button></div>
+    <div class="tiny" style="opacity:.8">Prossima serie a breve</div>`;
+  r.classList.remove('hidden'); clearInterval(_rest);
+  _rest=setInterval(()=>{ restT--; if(restT<=0){ skipRest(); return; } tickRest(); },1000);
+}
+window.addRest=(s)=>{ restT+=s; tickRest(); };
+window.skipRest=()=>{ clearInterval(_rest); $('#rest').classList.add('hidden'); };
 
 /* ============================================================
    TAB 2 — CALENDARIO
