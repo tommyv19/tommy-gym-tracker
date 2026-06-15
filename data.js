@@ -534,24 +534,48 @@ const DEFAULT_PLAN = {
   ]
 };
 
-/* ---------- Riscaldamento ---------- */
-const SPIN_WARMUP = { name:'🚴 Spin Bike Yesoul', detail:'5–8 min · resistenza bassa→media, cadenza 80–100 rpm. Aumenta leggermente negli ultimi 60 secondi.' };
+/* ---------- Riscaldamento ----------
+   Ogni voce può avere: exId (esercizio della libreria → immagine + tecnica)
+   oppure fdb (nome inglese per immagine da free-exercise-db).
+   steps = istruzioni rapide mostrate nella sezione richiudibile. */
+const SPIN_WARMUP = { name:'Spin Bike Yesoul', icon:'🚴', fdb:'Bicycling Stationary',
+  detail:'5–8 min · resistenza bassa→media, cadenza 80–100 rpm. Aumenta leggermente negli ultimi 60 secondi.',
+  steps:['Siediti con schiena dritta e spalle rilassate.','Inizia con resistenza bassa e cadenza comoda (80 rpm).','Sali gradualmente la resistenza fino a leggero affanno.','Ultimi 60 secondi un po\' più intensi, poi scendi.'] };
+
 const WARMUP_GENERAL = [
-  {name:'Jumping jacks', detail:'30–45 secondi'},
-  {name:'Circonduzioni delle braccia', detail:'30s avanti + 30s indietro'},
-  {name:'Circonduzioni delle anche', detail:'30 secondi per lato'},
-  {name:'Torsioni del busto', detail:'20 ripetizioni controllate'},
-  {name:'Cat-cow (gatto-mucca)', detail:'8–10 ripetizioni col respiro'}
+  {name:'Jumping jacks', icon:'⭐', detail:'30–45 secondi', steps:['In piedi, salta aprendo gambe e portando le braccia sopra la testa.','Torna alla posizione di partenza e ripeti a ritmo costante.']},
+  {name:'Circonduzioni delle braccia', fdb:'Arm Circles', detail:'30s avanti + 30s indietro', steps:['Braccia tese ai lati.','Disegna cerchi ampi in avanti per 30s, poi indietro per 30s.']},
+  {name:'Circonduzioni delle anche', icon:'🔄', detail:'30 secondi per lato', steps:['Mani sui fianchi, piedi a larghezza spalle.','Disegna cerchi ampi col bacino, prima in un senso poi nell\'altro.']},
+  {name:'Torsioni del busto', icon:'🔁', detail:'20 ripetizioni controllate', steps:['In piedi, braccia rilassate.','Ruota il busto a destra e sinistra lasciando seguire le braccia.']},
+  {name:'Cat-cow (gatto-mucca)', exId:'cat-cow', detail:'8–10 ripetizioni col respiro'}
 ];
+
 const WARMUPS = {
-  petto: [{name:'Push-up lenti',detail:'10 ripetizioni'},{name:'Band/asciugamano pull-apart',detail:'15 ripetizioni'},{name:'Circonduzioni spalle',detail:'20 ripetizioni'}],
-  spalle:[{name:'Alzate laterali senza peso',detail:'20 ripetizioni'},{name:'Band pull-apart',detail:'15 ripetizioni'},{name:'Rotazioni esterne con elastico',detail:'12 per lato'}],
-  tricipiti:[{name:'Push-up lenti',detail:'10 ripetizioni'},{name:'Estensioni a vuoto',detail:'15 ripetizioni'},{name:'Circonduzioni spalle',detail:'20 ripetizioni'}],
-  schiena:[{name:'Scapular pull (o rematori a vuoto)',detail:'15 ripetizioni'},{name:'Cat-cow',detail:'10 ripetizioni'},{name:'Good morning a corpo libero',detail:'12 ripetizioni'}],
-  bicipiti:[{name:'Circonduzioni braccia indietro',detail:'30 secondi'},{name:'Curl a vuoto',detail:'15 ripetizioni'},{name:'Scapular pull',detail:'12 ripetizioni'}],
-  gambe:[{name:'Squat a corpo libero',detail:'15 ripetizioni'},{name:'Affondi dinamici',detail:'10 per gamba'},{name:'Slanci gambe avanti/laterali',detail:'12 per lato'},{name:'Ponte glutei',detail:'15 ripetizioni'}],
-  glutei:[{name:'Ponte glutei',detail:'15 ripetizioni'},{name:'Slanci gamba indietro',detail:'12 per lato'},{name:'Squat a corpo libero',detail:'15 ripetizioni'}],
-  core:[{name:'Plank',detail:'20–30 secondi'},{name:'Dead bug lento',detail:'10 per lato'},{name:'Bird-dog',detail:'10 per lato'}]
+  petto: [{name:'Push-up lenti', exId:'push-up', detail:'10 ripetizioni'},
+          {name:'Band/asciugamano pull-apart', fdb:'Band Pull Apart', detail:'15 ripetizioni', steps:['Tieni un elastico (o asciugamano) teso davanti a te.','Apri le braccia stringendo le scapole, poi torna lento.']},
+          {name:'Circonduzioni spalle', fdb:'Arm Circles', detail:'20 ripetizioni'}],
+  spalle:[{name:'Alzate laterali senza peso', exId:'alzate-laterali', detail:'20 ripetizioni'},
+          {name:'Band pull-apart', fdb:'Band Pull Apart', detail:'15 ripetizioni', steps:['Elastico teso davanti, braccia all\'altezza spalle.','Apri stringendo le scapole, ritorna controllato.']},
+          {name:'Rotazioni esterne con elastico', icon:'🔧', detail:'12 per lato', steps:['Gomito al fianco a 90°, elastico in mano.','Ruota l\'avambraccio verso l\'esterno, poi rientra lento.']}],
+  tricipiti:[{name:'Push-up lenti', exId:'push-up', detail:'10 ripetizioni'},
+          {name:'Estensioni a vuoto', icon:'💪', detail:'15 ripetizioni', steps:['Gomiti alti e fermi.','Estendi e fletti gli avambracci a vuoto per scaldare i tricipiti.']},
+          {name:'Circonduzioni spalle', fdb:'Arm Circles', detail:'20 ripetizioni'}],
+  schiena:[{name:'Scapular pull (o rematori a vuoto)', icon:'🪢', detail:'15 ripetizioni', steps:['Simula una trazione: abbassa e stringi le scapole senza piegare i gomiti.','Rilascia lento e ripeti.']},
+          {name:'Cat-cow', exId:'cat-cow', detail:'10 ripetizioni'},
+          {name:'Good morning a corpo libero', exId:'good-morning', detail:'12 ripetizioni'}],
+  bicipiti:[{name:'Circonduzioni braccia indietro', fdb:'Arm Circles', detail:'30 secondi'},
+          {name:'Curl a vuoto', exId:'curl-manubri', detail:'15 ripetizioni'},
+          {name:'Scapular pull', icon:'🪢', detail:'12 ripetizioni', steps:['Stringi e abbassa le scapole, come a inizio trazione.','Rilascia lento.']}],
+  gambe:[{name:'Squat a corpo libero', exId:'squat', detail:'15 ripetizioni'},
+          {name:'Affondi dinamici', exId:'affondi', detail:'10 per gamba'},
+          {name:'Slanci gambe avanti/laterali', icon:'🦵', detail:'12 per lato', steps:['Appoggiati a un supporto.','Oscilla la gamba avanti-indietro, poi lateralmente, con controllo.']},
+          {name:'Ponte glutei', exId:'glute-bridge', detail:'15 ripetizioni'}],
+  glutei:[{name:'Ponte glutei', exId:'glute-bridge', detail:'15 ripetizioni'},
+          {name:'Slanci gamba indietro', exId:'kickback-glutei', detail:'12 per lato'},
+          {name:'Squat a corpo libero', exId:'squat', detail:'15 ripetizioni'}],
+  core:[{name:'Plank', exId:'plank', detail:'20–30 secondi'},
+          {name:'Dead bug lento', exId:'deadbug', detail:'10 per lato'},
+          {name:'Bird-dog', icon:'🐕', detail:'10 per lato', steps:['A quattro zampe.','Estendi braccio e gamba opposti mantenendo il bacino fermo.','Alterna lentamente.']}]
 };
 
 const DAY_COLORS = { A:'var(--A)', B:'var(--B)', C:'var(--C)', D:'var(--D)' };

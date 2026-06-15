@@ -66,10 +66,9 @@ const Media = {
     }).catch(()=>{ this.index = {}; return {}; });
     return this.loading;
   },
-  // returns [url0,url1] or null
-  match(ex){
-    if (!this.index) return null;
-    const q = FDB_MATCH[ex.id]; if (!q) return null;
+  // returns [url0,url1] or null for an English exercise name
+  framesByName(q){
+    if (!this.index || !q) return null;
     const nq = this.norm(q);
     let imgs = this.index[nq];
     if (!imgs){ // token-subset fallback
@@ -84,8 +83,17 @@ const Media = {
     }
     if (!imgs) return null;
     return imgs.slice(0,2).map(p => FDB_IMG + p);
-  }
+  },
+  match(ex){ return this.framesByName(FDB_MATCH[ex.id]); }
 };
+
+// build an animated 2-frame viewer from raw frame URLs (hides itself if image fails)
+function animFrames(frames, alt){
+  if (!frames) return '';
+  return `<div class="frames"><div class="frame anim-box" style="flex:1.4">
+      <img class="anim-img" data-f0="${frames[0]}" data-f1="${frames[1]||frames[0]}" src="${frames[0]}" alt="${esc(alt||'')}" loading="lazy" onerror="this.closest('.frame').style.display='none'">
+      <div class="lbl">▶ Movimento</div></div></div>`;
+}
 
 /* Renders an animated, GIF-like 2-frame viewer; falls back to SVG figure.
    mode 'anim' = single auto-toggling box; 'dual' = two frames side by side. */
@@ -321,31 +329,43 @@ function renderSets(exId, st){
   return h;
 }
 
+let _wuId = 0;
+function warmupCard(item, express){
+  const id = 'wu'+(_wuId++);
+  // resolve media: linked exercise (exId) or direct FDB name (fdb)
+  let media = '', steps = item.steps || [];
+  if (item.exId){
+    const ex = EX_BY_ID[item.exId];
+    if (ex){ media = exerciseMedia(ex, 'anim'); if (!steps.length) steps = ex.steps; }
+  } else if (item.fdb){
+    media = animFrames(Media.framesByName(item.fdb), item.name);
+  }
+  const icon = item.icon || '🔥';
+  return `<div class="card ex-card" id="${id}" style="padding:12px">
+    <div class="ex-head" onclick="toggleGeneric('${id}')">
+      <span style="font-size:18px">${icon}</span>
+      <div><h3 style="font-size:14px">${esc(item.name)}</h3><div class="tiny muted">${esc(item.detail)}</div></div>
+      <span class="chev">›</span></div>
+    <div class="ex-body">
+      ${media}
+      ${steps.length?`<ol class="small" style="padding-left:18px;margin:8px 0 0;color:#cfcfcf">${steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`:''}
+    </div></div>`;
+}
 function renderWarmup(day, express){
   const specific = WARMUPS[day.muscleGroup] || [];
   const gen = express ? WARMUP_GENERAL.slice(0,3) : WARMUP_GENERAL;
-  const spinTime = express ? '3–4 min' : SPIN_WARMUP.detail;
-  const open = DB.get('warmupOpen', true);
-  let items = `<div class="row" style="gap:8px;align-items:flex-start;margin-bottom:8px">
-      <span style="font-size:18px">🚴</span><div><b>${esc(SPIN_WARMUP.name)}</b>
-      <div class="tiny muted">${express?'3–4 min · cadenza progressiva':esc(SPIN_WARMUP.detail)}</div></div></div>`;
-  const li = (a)=>`<div class="row" style="gap:8px;align-items:flex-start;margin-bottom:6px">
-      <span class="dot" style="background:var(--warn);margin-top:6px"></span>
-      <div class="small"><b>${esc(a.name)}</b> <span class="muted">— ${esc(a.detail)}</span></div></div>`;
-  items += `<div class="tiny muted" style="margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em">Mobilità generale</div>`;
-  items += gen.map(li).join('');
+  const spin = Object.assign({}, SPIN_WARMUP, express?{detail:'3–4 min · cadenza progressiva'}:{});
+  let h = `<h2>🔥 Riscaldamento <span class="tiny muted" style="font-weight:400">· ${express?'~5 min':'~8–10 min'} · tocca per i dettagli</span></h2>`;
+  h += warmupCard(spin, express);
+  h += `<div class="tiny muted" style="margin:10px 0 6px;text-transform:uppercase;letter-spacing:.04em">Mobilità generale</div>`;
+  h += gen.map(it=>warmupCard(it,express)).join('');
   if (specific.length){
-    items += `<div class="tiny muted" style="margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em">Attivazione ${esc(day.name)}</div>`;
-    items += specific.map(li).join('');
+    h += `<div class="tiny muted" style="margin:10px 0 6px;text-transform:uppercase;letter-spacing:.04em">Attivazione ${esc(day.name)}</div>`;
+    h += specific.map(it=>warmupCard(it,express)).join('');
   }
-  return `<div class="card ex-card ${open?'open':''}" id="warmup-card">
-    <div class="ex-head" onclick="toggleWarmup()">
-      <span style="font-size:18px">🔥</span>
-      <div><h3>Riscaldamento</h3><div class="tiny muted">${express?'~5 min':'~8–10 min'} · prepara muscoli e articolazioni</div></div>
-      <span class="chev">›</span></div>
-    <div class="ex-body">${items}</div></div>`;
+  return h;
 }
-window.toggleWarmup = ()=>{ const v=!DB.get('warmupOpen',true); DB.set('warmupOpen',v); $('#warmup-card').classList.toggle('open',v); };
+window.toggleGeneric = (id)=>{ const el=$('#'+id); if(el){ el.classList.toggle('open'); startAnimations(); } };
 window.setTime = (express)=>{ DB.set('expressMode', express); VIEWS.scheda(); startAnimations(); };
 
 window.selectDay = (i)=>{ curDayIdx=i; VIEWS.scheda(); };
@@ -646,6 +666,26 @@ window.openExercise = function(id){
    TAB 4 — PROGRESSI & AI COACH
    ============================================================ */
 let metricPeriod = 90;
+// Tutti i campi misurazione (coprono i dati della bilancia Renpho)
+const METRIC_FIELDS = [
+  {k:'weight', l:'Peso (kg)'},
+  {k:'bodyFat', l:'Grasso corporeo %'},
+  {k:'muscleMass', l:'Massa muscolare (kg)'},
+  {k:'water', l:'Acqua corporea %'},
+  {k:'skeletalMuscle', l:'Muscolo scheletrico %'},
+  {k:'leanMass', l:'Peso senza grassi (kg)'},
+  {k:'subcutaneousFat', l:'Grasso sottocutaneo %'},
+  {k:'visceralFat', l:'Grasso viscerale'},
+  {k:'boneMass', l:'Massa ossea (kg)'},
+  {k:'protein', l:'Proteine %'},
+  {k:'bmr', l:'BMR (kcal)'},
+  {k:'metabolicAge', l:'Età metabolica'},
+  {k:'bmi', l:'BMI'},
+  {k:'waist', l:'Vita (cm)'},
+  {k:'chest', l:'Petto (cm)'},
+  {k:'arms', l:'Braccia (cm)'},
+  {k:'thighs', l:'Cosce (cm)'}
+];
 VIEWS.progressi = function(){
   const metrics = DB.get('bodyMetrics', []);
   const photos = DB.get('progressPhotos', []);
@@ -659,17 +699,11 @@ VIEWS.progressi = function(){
       <button class="btn sm primary" style="margin-top:8px" onclick="go('progressi');requestPlanChange()">Genera nuova scheda</button></div>`;
   }
 
-  // measurements input
+  // measurements input — tutti i dati Renpho
   h += `<h2>Misurazioni corporee</h2><div class="card">
     <div class="grid2">
-      <div><label class="fld">Peso (kg)</label><input type="number" id="m-weight" value="${last?last.weight:''}"></div>
-      <div><label class="fld">Grasso % (BPI)</label><input type="number" id="m-bf" value="${last?last.bodyFat:''}"></div>
-      <div><label class="fld">Massa musc. (kg)</label><input type="number" id="m-mm" value="${last?last.muscleMass:''}"></div>
-      <div><label class="fld">Acqua %</label><input type="number" id="m-water" value="${last?last.water:''}"></div>
-      <div><label class="fld">Vita (cm)</label><input type="number" id="m-waist" value="${last?last.waist:''}"></div>
-      <div><label class="fld">Petto (cm)</label><input type="number" id="m-chest" value="${last?last.chest:''}"></div>
-      <div><label class="fld">Braccia (cm)</label><input type="number" id="m-arms" value="${last?last.arms:''}"></div>
-      <div><label class="fld">Cosce (cm)</label><input type="number" id="m-thighs" value="${last?last.thighs:''}"></div>
+      ${METRIC_FIELDS.map(f=>`<div><label class="fld">${f.l}</label>
+        <input type="number" inputmode="decimal" id="m-${f.k}" value="${last&&last[f.k]!=null?last[f.k]:''}"></div>`).join('')}
     </div>
     <button class="btn primary block" style="margin-top:12px" onclick="saveMetric()">💾 Salva misurazione di oggi</button>
     <button class="btn ghost block sm" style="margin-top:8px" onclick="healthSyncInfo()">📲 Sincronizza da Apple Salute / Renpho</button>
@@ -701,7 +735,7 @@ VIEWS.progressi = function(){
     <div class="chat-input">
       <input type="text" id="ai-input" placeholder="Chiedi al coach..." onkeydown="if(event.key==='Enter')aiSend()">
       <button class="btn primary" onclick="aiSend()">➤</button></div>
-    ${settings().claudeApiKey?'':'<div class="tiny muted" style="margin-top:8px">⚠️ Inserisci la API key di Claude nelle Impostazioni per attivare il coach.</div>'}
+    ${(settings().claudeApiKey||settings().claudeProxyUrl)?'':'<div class="tiny muted" style="margin-top:8px">⚠️ Configura la API key di Claude (o il Proxy URL) nelle Impostazioni per attivare il coach.</div>'}
   </div>`;
 
   $('#view-progressi').innerHTML = h;
@@ -728,12 +762,11 @@ window.healthSyncInfo = function(){
 window.copyText = function(t){ try{ navigator.clipboard.writeText(t); toast('Copiato'); }catch(e){ toast('Copia manuale: '+t.slice(0,40)+'…'); } };
 
 window.saveMetric = function(){
-  const m = { date:today(),
-    weight:num('m-weight'), bodyFat:num('m-bf'), muscleMass:num('m-mm'), water:num('m-water'),
-    waist:num('m-waist'), chest:num('m-chest'), arms:num('m-arms'), thighs:num('m-thighs') };
+  const m = { date:today() };
+  METRIC_FIELDS.forEach(f=>{ const v=num('m-'+f.k); if(v!=null) m[f.k]=v; });
   const arr = DB.get('bodyMetrics', []);
   const i = arr.findIndex(x=>x.date===m.date);
-  if (i>=0) arr[i]=m; else arr.push(m);
+  if (i>=0) arr[i]=Object.assign(arr[i], m); else arr.push(m);
   arr.sort((a,b)=>a.date.localeCompare(b.date));
   DB.set('bodyMetrics', arr); toast('Misurazione salvata'); VIEWS.progressi();
 };
@@ -797,28 +830,35 @@ function buildContext(){
   const recent=Object.entries(log).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,10)
     .map(([d,w])=>`${d}: Giorno ${w.dayType}, ${w.durationMin}min`).join('; ');
   const last=metrics[metrics.length-1];
+  const lastStr = last ? METRIC_FIELDS.filter(f=>last[f.k]!=null).map(f=>`${f.l}: ${last[f.k]}`).join(', ') : 'nessuna';
   return `[DATI TOMMY]
 Scheda attiva (v${plan.version}, dal ${plan.startDate}): ${plan.days.map(d=>`Giorno ${d.type} ${d.name} [${d.exercises.map(e=>e.exId).join(', ')}]`).join(' | ')}
+Giorni di allenamento/settimana: ${getTrainingDays().length}
 Settimane dall'ultima modifica scheda: ${weeksSincePlanChange()}
 Ultime sessioni: ${recent||'nessuna'}
-Ultima misurazione: ${last?`peso ${last.weight}kg, grasso ${last.bodyFat}%, massa ${last.muscleMass}kg`:'nessuna'}
+Ultima misurazione (${last?last.date:'-'}): ${lastStr}
 Misurazioni totali registrate: ${metrics.length}`;
 }
 const SYS_PROMPT = `Sei un personal trainer esperto e nutrizionista sportivo. Il tuo cliente si chiama Tommy, ha circa 30 anni, obiettivo Men's Physique (definizione, pancia piatta, no bulk eccessivo). Attrezzatura disponibile: Spin Bike, Rack con bilancieri, manubri, multi-power. Parla sempre in italiano, sii diretto e motivante. Quando analizzi i dati di allenamento, considera: frequenza settimanale, progressione dei pesi, volume totale, recupero. Quando suggerisci un cambio scheda, fornisci sempre la scheda completa in formato JSON strutturato.`;
 
 async function callClaude(userMsg, extra){
   const s=settings();
-  if (!s.claudeApiKey){ return '⚠️ Manca la API key di Claude. Vai in Impostazioni e inseriscila.'; }
+  if (!s.claudeApiKey && !s.claudeProxyUrl){ return '⚠️ Manca la configurazione AI. Vai in Impostazioni → Claude AI e inserisci la API key oppure il Proxy URL.'; }
   const hist=DB.get('chatHistory',[]).slice(-8).map(m=>({role:m.role, content:m.content}));
   const messages=[...hist, {role:'user', content:(extra?extra+'\n\n':'')+userMsg}];
+  const body={ model:s.claudeModel||'claude-sonnet-4-6', max_tokens:1200,
+    system: SYS_PROMPT+'\n\n'+buildContext(), messages };
   try {
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'content-type':'application/json','x-api-key':s.claudeApiKey,
-        'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({ model:s.claudeModel||'claude-sonnet-4-6', max_tokens:1200,
-        system: SYS_PROMPT+'\n\n'+buildContext(), messages })
-    });
+    let res;
+    if (s.claudeProxyUrl){
+      // il proxy custodisce la chiave lato server (consigliato)
+      res=await fetch(s.claudeProxyUrl,{ method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body) });
+    } else {
+      res=await fetch('https://api.anthropic.com/v1/messages',{ method:'POST',
+        headers:{'content-type':'application/json','x-api-key':s.claudeApiKey,
+          'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify(body) });
+    }
     if(!res.ok){ const t=await res.text(); return '❌ Errore API ('+res.status+'): '+t.slice(0,200); }
     const data=await res.json();
     return (data.content && data.content[0] && data.content[0].text) || '(nessuna risposta)';
@@ -910,11 +950,17 @@ VIEWS.impostazioni = function(){
     <button class="btn block sm" style="margin-top:10px" onclick="setTrainingDays([1,2,4,6])">Usa Lun · Mar · Gio · Sab</button>
   </div>`;
 
+  const keyMask = s.claudeApiKey ? ('✅ Chiave salvata ('+s.claudeApiKey.slice(0,7)+'…'+s.claudeApiKey.slice(-4)+')') : '⚠️ Nessuna chiave salvata';
   h+=`<h2>🤖 Claude AI</h2><div class="card">
-    <label class="fld">API Key (sk-ant-...)</label><input id="s-key" type="password" value="${esc(s.claudeApiKey)}">
+    <div class="small" style="margin-bottom:8px;color:${s.claudeApiKey?'var(--ok)':'var(--warn)'}">${keyMask}</div>
+    <label class="fld">API Key (sk-ant-...) — lascia vuoto per non cambiarla</label>
+    <input id="s-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${s.claudeApiKey?'••• già salvata •••':'incolla qui sk-ant-...'}">
     <label class="fld">Modello</label><input id="s-model" value="${esc(s.claudeModel)}">
-    <div class="tiny muted" style="margin-top:8px">La chiave resta solo sul tuo dispositivo (localStorage) e viene usata per chiamate dirette all'API.</div>
-    <button class="btn block" style="margin-top:10px" onclick="saveAI()">Salva AI</button></div>`;
+    <label class="fld">Proxy URL (opzionale, consigliato — vedi sotto)</label>
+    <input id="s-proxy" type="text" autocomplete="off" placeholder="https://...workers.dev" value="${esc(s.claudeProxyUrl||'')}">
+    <div class="tiny muted" style="margin-top:8px">Con il <b>Proxy URL</b> la chiave resta sul server e non serve inserirla qui. Senza proxy, la chiave è salvata solo su questo dispositivo.</div>
+    <button class="btn primary block" style="margin-top:10px" onclick="saveAI()">Salva AI</button>
+    ${s.claudeApiKey?'<button class="btn ghost block sm" style="margin-top:8px" onclick="clearKey()">Rimuovi chiave salvata</button>':''}</div>`;
 
   h+=`<h2>📧 EmailJS</h2><div class="card">
     <label class="fld">Service ID</label><input id="s-sid" value="${esc(s.emailjsServiceId)}">
@@ -939,7 +985,12 @@ window.toggleTD=function(d){ const s=settings(); let t=Array.isArray(s.trainingD
 window.setTrainingDays=function(arr){ const s=settings(); s.trainingDays=arr.slice(); saveSettings(s); toast('Settimana impostata'); VIEWS.impostazioni(); };
 window.saveGeneral=function(){ const s=settings(); s.userName=$('#s-name').value; s.email=$('#s-email').value;
   s.planStartDate=$('#s-start').value; s.notifyWeeks=parseInt($('#s-weeks').value)||6; saveSettings(s); toast('Salvato'); };
-window.saveAI=function(){ const s=settings(); s.claudeApiKey=$('#s-key').value.trim(); s.claudeModel=$('#s-model').value.trim()||'claude-sonnet-4-6'; saveSettings(s); toast('AI salvato'); };
+window.saveAI=function(){ const s=settings();
+  const k=$('#s-key').value.trim(); if(k) s.claudeApiKey=k;   // vuoto = non cambiare
+  s.claudeModel=$('#s-model').value.trim()||'claude-sonnet-4-6';
+  s.claudeProxyUrl=$('#s-proxy').value.trim();
+  saveSettings(s); toast((s.claudeApiKey||s.claudeProxyUrl)?'AI salvato ✅':'AI salvato'); VIEWS.impostazioni(); };
+window.clearKey=function(){ const s=settings(); s.claudeApiKey=''; saveSettings(s); toast('Chiave rimossa'); VIEWS.impostazioni(); };
 window.saveEmail=function(){ const s=settings(); s.emailjsServiceId=$('#s-sid').value.trim(); s.emailjsTemplateId=$('#s-tid').value.trim(); s.emailjsUserId=$('#s-uid').value.trim(); saveSettings(s); toast('EmailJS salvato'); };
 
 window.exportData=function(){
@@ -1035,7 +1086,9 @@ function ingestHealthParams(){
   if(![...qs.keys()].length) return;
   const map={weight:'weight',peso:'weight',bf:'bodyFat',bodyfat:'bodyFat',grasso:'bodyFat',muscle:'muscleMass',
     massa:'muscleMass',water:'water',acqua:'water',waist:'waist',vita:'waist',chest:'chest',petto:'chest',
-    arms:'arms',braccia:'arms',thighs:'thighs',cosce:'thighs'};
+    arms:'arms',braccia:'arms',thighs:'thighs',cosce:'thighs',
+    bmi:'bmi',lean:'leanMass',skeletal:'skeletalMuscle',visceral:'visceralFat',subcutaneous:'subcutaneousFat',
+    bone:'boneMass',protein:'protein',proteine:'protein',bmr:'bmr',metabolicage:'metabolicAge',eta:'metabolicAge'};
   const arr=DB.get('bodyMetrics',[]); const i=arr.findIndex(x=>x.date===today());
   let m = i>=0 ? Object.assign({},arr[i]) : {date:today()}; let got=false;
   for(const [k,v] of qs.entries()){ const f=map[k.toLowerCase()]; const val=parseFloat(String(v).replace(',','.'));
