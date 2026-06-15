@@ -205,6 +205,54 @@ function buildFigure(poseName, primary, secondary){
   return s;
 }
 
+/* ---------- Muscle map (omino) — front + back, highlights worked muscles ---------- */
+function buildMuscleMap(primary, secondary){
+  primary = primary||[]; secondary = secondary||[];
+  const base = 'var(--muscle-base)';
+  const E=(cx,cy,rx,ry,f)=>`<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${f}"/>`;
+  const C=(cx,cy,r,f)=>`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${f}"/>`;
+  const R=(x,y,w,h,rr,f)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rr}" fill="${f}"/>`;
+  function body(ox){
+    return C(ox+50,14,9,base)
+      + R(ox+47,21,6,6,2,base)
+      + R(ox+36,25,28,40,11,base)
+      + C(ox+34,31,7,base)+C(ox+66,31,7,base)
+      + R(ox+25,31,8,24,4,base)+R(ox+67,31,8,24,4,base)
+      + R(ox+24,53,7,22,3,base)+R(ox+69,53,7,22,3,base)
+      + R(ox+38,60,24,11,5,base)
+      + R(ox+38,68,11,35,5,base)+R(ox+51,68,11,35,5,base)
+      + R(ox+39,103,9,32,4,base)+R(ox+52,103,9,32,4,base);
+  }
+  function shapes(m,f){
+    switch(m){
+      case 'chest': return E(44,35,6,4,f)+E(56,35,6,4,f);
+      case 'shoulders': return C(34,31,5,f)+C(66,31,5,f)+C(134,31,5,f)+C(166,31,5,f);
+      case 'rearDelts': return C(134,31,5,f)+C(166,31,5,f);
+      case 'biceps': return E(29,41,3.5,6,f)+E(71,41,3.5,6,f);
+      case 'triceps': return E(129,41,3.5,6,f)+E(171,41,3.5,6,f);
+      case 'forearms': return E(27.5,62,3,7,f)+E(72.5,62,3,7,f);
+      case 'abs': case 'core': return R(45,43,10,7,2,f)+R(45,52,10,7,2,f);
+      case 'obliques': return E(41,51,2.5,7,f)+E(59,51,2.5,7,f);
+      case 'back': case 'lats': return E(144,45,5,9,f)+E(156,45,5,9,f);
+      case 'traps': return E(150,30,9,5,f);
+      case 'lowerBack': return R(145,55,10,9,3,f);
+      case 'quads': case 'adductors': return E(43.5,83,5,13,f)+E(56.5,83,5,13,f);
+      case 'hamstrings': return E(143.5,85,5,12,f)+E(156.5,85,5,12,f);
+      case 'glutes': return E(144,68,6,6,f)+E(156,68,6,6,f);
+      case 'calves': return E(43.5,117,4,10,f)+E(56.5,117,4,10,f)+E(143.5,117,4,11,f)+E(156.5,117,4,11,f);
+      default: return '';
+    }
+  }
+  let s = `<svg viewBox="0 0 200 152" xmlns="http://www.w3.org/2000/svg">`;
+  s += body(0) + body(100);
+  secondary.forEach(m=> s+=shapes(m,'#1A6FBF'));
+  primary.forEach(m=> s+=shapes(m,'#E8472A'));
+  s += `<text x="50" y="150" text-anchor="middle" font-size="8" fill="#9aa0a8">FRONTE</text>`;
+  s += `<text x="150" y="150" text-anchor="middle" font-size="8" fill="#9aa0a8">RETRO</text>`;
+  s += `</svg>`;
+  return s;
+}
+
 /* ---------- Exercise database (84) ---------- */
 const E = (id,name,cat,equip,diff,primary,secondary,start,end,steps,variants,stretch)=>(
   {id,name,cat,equip,diff,primary,secondary,start,end,steps,variants,stretch});

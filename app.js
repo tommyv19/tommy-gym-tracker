@@ -27,9 +27,12 @@ function settings(){
     planStartDate: today(), lastPlanChange: today(),
     emailjsServiceId:'', emailjsTemplateId:'', emailjsUserId:'',
     claudeApiKey:'', claudeModel:'claude-sonnet-4-6', notifyWeeks:6,
-    trainingDays:[1,2,4,6] // Lun, Mar, Gio, Sab (0=Dom ... 6=Sab)
+    trainingDays:[1,2,4,6], // Lun, Mar, Gio, Sab (0=Dom ... 6=Sab)
+    theme:'light'
   });
 }
+function applyTheme(){ document.documentElement.dataset.theme = settings().theme || 'light'; }
+window.setTheme = function(t){ const s=settings(); s.theme=t; saveSettings(s); applyTheme(); VIEWS.impostazioni(); };
 function getTrainingDays(){ const t=settings().trainingDays; return Array.isArray(t)?t:[1,2,4,6]; }
 const WD_SHORT = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
 const WD_LONG  = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
@@ -123,6 +126,17 @@ function exerciseMedia(ex, mode){
   return `<div class="frames"><div class="frame anim-box" style="flex:1.4">
       <img class="anim-img" data-f0="${frames[0]}" data-f1="${frames[1]||frames[0]}" data-ex="${ex.id}" data-pose="start" src="${frames[0]}" alt="${esc(ex.name)}" loading="lazy" onerror="mediaFail(this)">
       <div class="lbl">▶ Movimento</div></div></div>`;
+}
+
+// muscle map block (omino) with legend
+function muscleMapBlock(ex){
+  return `<div class="musclemap card" style="padding:10px;margin-top:10px;background:var(--card-2)">
+    <div class="tiny muted" style="margin-bottom:2px">🧍 Muscoli coinvolti</div>
+    ${buildMuscleMap(ex.primary, ex.secondary)}
+    <div class="row" style="gap:16px;justify-content:center;margin-top:2px">
+      <span class="tiny"><span class="dot" style="background:#E8472A"></span> Primari</span>
+      <span class="tiny"><span class="dot" style="background:#1A6FBF"></span> Secondari</span>
+    </div></div>`;
 }
 
 // drive all .anim-img toggling between start/end frame
@@ -222,6 +236,8 @@ VIEWS.scheda = function(){
       <div class="sub">${todayCap}</div>
     </div></div>`;
 
+  h += renderWeekStrip();
+
   // smart recommendation banner
   const isTrainingDay = getTrainingDays().includes(new Date().getDay());
   if (doneToday){
@@ -239,6 +255,13 @@ VIEWS.scheda = function(){
       <div class="row" style="gap:10px"><span class="dot bg-${recDay.type}" style="width:14px;height:14px"></span>
       <div><b style="color:${DAY_HEX[recDay.type]}">Oggi tocca al Giorno ${recDay.type} 💪</b>
       <div class="tiny muted">${esc(recDay.name)} · è uno dei tuoi giorni di allenamento</div></div></div></div>`;
+  }
+
+  // "fai una scheda diversa"
+  if (curDayIdx!==recIdx && !doneToday){
+    h += `<div class="tiny muted center" style="margin:-4px 0 10px">Stai guardando il Giorno ${day.type} (consigliato: ${recDay.type})</div>`;
+  } else if (!doneToday){
+    h += `<button class="btn ghost block sm" style="margin-bottom:10px" onclick="pickDifferentDay()">🔀 Voglio fare una scheda diversa</button>`;
   }
 
   // day selector
@@ -303,6 +326,7 @@ function renderExCard(ex, planEx, st, idx){
     <div class="ex-body">
       ${exerciseMedia(ex,'anim')}
       <div class="muscle-line">● Muscoli: <b>${ex.primary.map(m=>MUSCLE_LABELS[m]||m).join(', ')}</b>${ex.secondary.length?' · '+ex.secondary.map(m=>MUSCLE_LABELS[m]||m).join(', '):''}</div>
+      ${muscleMapBlock(ex)}
       <button class="btn sm block" style="margin-top:10px" onclick="openSwap('${ex.id}')">🔄 Sostituisci con un esercizio equivalente</button>
       <div class="sets" id="sets-${ex.id}">${renderSets(ex.id, st)}</div>
       <div class="tech"><b class="small">Tecnica</b><ol>${ex.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
@@ -368,7 +392,27 @@ function renderWarmup(day, express){
 window.toggleGeneric = (id)=>{ const el=$('#'+id); if(el){ el.classList.toggle('open'); startAnimations(); } };
 window.setTime = (express)=>{ DB.set('expressMode', express); VIEWS.scheda(); startAnimations(); };
 
-window.selectDay = (i)=>{ curDayIdx=i; VIEWS.scheda(); };
+function renderWeekStrip(){
+  const log=DB.get('workoutLog',{});
+  const now=new Date(); const monday=new Date(now); monday.setHours(0,0,0,0);
+  monday.setDate(now.getDate()-((now.getDay()+6)%7));
+  let h=`<div class="weekstrip">`;
+  for(let i=0;i<7;i++){ const d=new Date(monday); d.setDate(monday.getDate()+i);
+    const ds=d.toISOString().slice(0,10); const isToday=ds===today();
+    const w=log[ds]; const isTrain=getTrainingDays().includes(d.getDay());
+    const mark = w?`<span class="wk-let bg-${w.dayType}">${w.dayType}</span>`:(isTrain?`<span class="wk-dot"></span>`:`<span class="wk-dot empty"></span>`);
+    h+=`<div class="wk-cell ${isToday?'today':''}"><div class="wk-dow">${WD_SHORT[d.getDay()]}</div><div class="wk-num">${d.getDate()}</div>${mark}</div>`;
+  }
+  return h+`</div>`;
+}
+window.pickDifferentDay = function(){
+  const plan=activePlan();
+  openSheet(`<h3>🔀 Scegli la scheda di oggi</h3>
+    <p class="small muted">La rotazione riprenderà dal giorno che completi.</p>
+    ${plan.days.map((d,i)=>`<button class="btn block" style="margin-bottom:8px;text-align:left" onclick="selectDay(${i});closeSheet()">
+      <span class="dot bg-${d.type}" style="margin-right:8px"></span> Giorno ${d.type} — ${esc(d.name)}</button>`).join('')}`);
+};
+window.selectDay = (i)=>{ curDayIdx=i; VIEWS.scheda(); startAnimations(); };
 window.toggleEx = (id)=>{ const s=getSession(); s.exercises[id]._open=!s.exercises[id]._open; saveSession(s);
   $('#exc-'+id).classList.toggle('open'); startAnimations(); };
 window.setVal = (id,i,f,v)=>{ const s=getSession(); s.exercises[id].sets[i][f]=v; saveSession(s); };
@@ -653,6 +697,7 @@ window.openExercise = function(id){
   let h = `<h3>${esc(ex.name)}</h3>
     <div class="small muted">${CATEGORIES.find(c=>c.id===ex.cat)?.label||ex.cat} · ${ex.diff} · ${ex.equip.join(', ')}</div>
     <div style="margin-top:12px">${exerciseMedia(ex,'dual')}</div>
+    ${muscleMapBlock(ex)}
     <div class="muscle-line">● Primari: <b>${ex.primary.map(m=>MUSCLE_LABELS[m]||m).join(', ')}</b></div>
     ${ex.secondary.length?`<div class="muscle-line">○ Secondari: ${ex.secondary.map(m=>MUSCLE_LABELS[m]||m).join(', ')}</div>`:''}
     <div class="tech"><b class="small">Istruzioni</b><ol>${ex.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol></div>
@@ -816,10 +861,22 @@ window.doCompare = function(){
 };
 
 /* ===== AI Coach (Claude API, client-side) ===== */
+// mini markdown → HTML (grassetto, titoli, liste, righe, blocchi codice)
+function mdToHtml(t){
+  let s = esc(t);
+  s = s.replace(/```(?:json|JSON)?\s*\n?([\s\S]*?)```/g,(m,c)=>`<pre style="white-space:pre-wrap;background:var(--card-2);padding:8px;border-radius:8px;font-size:11px;overflow-x:auto;margin:6px 0">${c.trim()}</pre>`);
+  s = s.replace(/^\s*#{3}\s+(.*)$/gm,'<b>$1</b>');
+  s = s.replace(/^\s*#{1,2}\s+(.*)$/gm,'<b style="font-size:15px">$1</b>');
+  s = s.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+  s = s.replace(/^\s*[-*•]\s+(.*)$/gm,'• $1');
+  s = s.replace(/^\s*-{3,}\s*$/gm,'<hr style="border:none;border-top:1px solid var(--border);margin:8px 0">');
+  s = s.replace(/^\s*\|(.+)\|\s*$/gm,(m,row)=>'· '+row.split('|').map(c=>c.trim()).filter(Boolean).join('  ·  '));
+  return s;
+}
 function renderChat(){
   const hist = DB.get('chatHistory', []);
-  if (!hist.length) return `<div class="msg ai">Ciao Tommy! 💪 Sono il tuo AI Coach. Chiedimi qualsiasi cosa su allenamento, tecnica o alimentazione, oppure premi "Analizza progressi".</div>`;
-  return hist.map(m=>`<div class="msg ${m.role==='user'?'me':'ai'}">${esc(m.content)}</div>`).join('');
+  if (!hist.length) return `<div class="msg ai">Ciao Tommy! 💪 Sono il tuo AI Coach. Chiedimi qualsiasi cosa su allenamento, tecnica o alimentazione. Se ti propongo una nuova scheda, comparirà un pulsante per applicarla davvero all'app.</div>`;
+  return hist.map(m=>`<div class="msg ${m.role==='user'?'me':'ai'}">${m.role==='user'?esc(m.content):mdToHtml(m.content)}</div>`).join('');
 }
 function pushChat(role, content){ const h=DB.get('chatHistory',[]); h.push({role,content}); DB.set('chatHistory',h);
   const c=$('#ai-chat'); if(c){ c.innerHTML=renderChat(); c.scrollTop=c.scrollHeight; } }
@@ -837,9 +894,14 @@ Giorni di allenamento/settimana: ${getTrainingDays().length}
 Settimane dall'ultima modifica scheda: ${weeksSincePlanChange()}
 Ultime sessioni: ${recent||'nessuna'}
 Ultima misurazione (${last?last.date:'-'}): ${lastStr}
-Misurazioni totali registrate: ${metrics.length}`;
+Misurazioni totali registrate: ${metrics.length}
+EXID_DISPONIBILI (usa solo questi per le schede): ${EXERCISES.filter(e=>e.cat!=='stretching').map(e=>e.id).join(', ')}`;
 }
-const SYS_PROMPT = `Sei un personal trainer esperto e nutrizionista sportivo. Il tuo cliente si chiama Tommy, ha circa 30 anni, obiettivo Men's Physique (definizione, pancia piatta, no bulk eccessivo). Attrezzatura disponibile: Spin Bike, Rack con bilancieri, manubri, multi-power. Parla sempre in italiano, sii diretto e motivante. Quando analizzi i dati di allenamento, considera: frequenza settimanale, progressione dei pesi, volume totale, recupero. Quando suggerisci un cambio scheda, fornisci sempre la scheda completa in formato JSON strutturato.`;
+const SYS_PROMPT = `Sei un personal trainer esperto e nutrizionista sportivo. Il tuo cliente si chiama Tommy, ha circa 30 anni, obiettivo Men's Physique (definizione, pancia piatta, no bulk eccessivo). Attrezzatura disponibile: Spin Bike, Rack con bilancieri, manubri, multi-power. Parla sempre in italiano, sii diretto e motivante. Quando analizzi i dati di allenamento, considera: frequenza settimanale, progressione dei pesi, volume totale, recupero.
+
+REGOLA IMPORTANTE PER CAMBIARE LA SCHEDA: quando proponi o modifichi una scheda, includi SEMPRE un blocco \`\`\`json con ESATTAMENTE questa struttura:
+{"days":[{"type":"A","name":"Petto + Tricipiti","muscleGroup":"petto","exercises":[{"exId":"panca-piana","sets":4,"reps":"8-10"}]}]}
+Usa SOLO valori "exId" presi dalla lista ufficiale fornita nel contesto (campo EXID_DISPONIBILI). Non inventare exId. L'app leggerà quel JSON e mostrerà a Tommy un pulsante per applicare la scheda. Puoi aggiungere testo/spiegazione prima del blocco JSON.`;
 
 async function callClaude(userMsg, extra){
   const s=settings();
@@ -852,7 +914,8 @@ async function callClaude(userMsg, extra){
     let res;
     if (s.claudeProxyUrl){
       // il proxy custodisce la chiave lato server (consigliato)
-      res=await fetch(s.claudeProxyUrl,{ method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body) });
+      let purl=s.claudeProxyUrl; if(!/^https?:\/\//i.test(purl)) purl='https://'+purl;
+      res=await fetch(purl,{ method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body) });
     } else {
       res=await fetch('https://api.anthropic.com/v1/messages',{ method:'POST',
         headers:{'content-type':'application/json','x-api-key':s.claudeApiKey,
@@ -871,6 +934,7 @@ window.aiSend = async function(){
   const reply=await callClaude(msg);
   const h=DB.get('chatHistory',[]); h[h.length-1]={role:'assistant',content:reply}; DB.set('chatHistory',h);
   const c=$('#ai-chat'); if(c){ c.innerHTML=renderChat(); c.scrollTop=c.scrollHeight; }
+  const plan=extractPlan(reply); if(plan) showPlanSheet(plan);
 };
 window.aiAnalyze = async function(){
   pushChat('user','Analizza i miei progressi recenti e dammi consigli.');
@@ -901,24 +965,46 @@ window.genPlan = async function(type){
   const reply=await callClaude(instruction);
   const h=DB.get('chatHistory',[]); h[h.length-1]={role:'assistant',content:reply}; DB.set('chatHistory',h);
   VIEWS.progressi();
-  // try to extract a plan and offer to apply
   const plan=extractPlan(reply);
-  if (plan){
-    openSheet(`<h3>📋 Nuova scheda proposta</h3>
-      ${plan.days.map(d=>`<div class="card"><b class="acc-${d.type}">Giorno ${d.type} — ${esc(d.name)}</b>
-        ${d.exercises.map(e=>`<div class="small muted">• ${esc((EX_BY_ID[e.exId]||{}).name||e.exId)} — ${e.sets}×${esc(e.reps)}</div>`).join('')}</div>`).join('')}
-      <button class="btn ok block" onclick='applyPlan()'>✅ Approva e applica</button>
-      <button class="btn ghost block small" onclick="closeSheet()">Annulla</button>`);
-    window._pendingPlan=plan;
-  } else { toast('Leggi la proposta nella chat'); }
+  if (plan) showPlanSheet(plan); else toast('Leggi la proposta nella chat');
 };
+// Parser tollerante: accetta chiavi IT/EN ed esercizi per exId o per nome.
 function extractPlan(text){
-  try { const m=text.match(/\{[\s\S]*\}/); if(!m) return null;
-    const obj=JSON.parse(m[0]); if(!obj.days||!Array.isArray(obj.days)) return null;
-    obj.days=obj.days.filter(d=>d.exercises&&d.exercises.length).map(d=>({type:d.type||'A',name:d.name||'Allenamento',
-      muscleGroup:d.muscleGroup||'core', exercises:d.exercises.filter(e=>EX_BY_ID[e.exId]).map(e=>({exId:e.exId,sets:+e.sets||3,reps:String(e.reps||'10')}))}));
-    return obj.days.length?obj:null;
+  try {
+    let raw=null; const fence=text.match(/```(?:json|JSON)?\s*([\s\S]*?)```/);
+    if(fence) raw=fence[1]; else { const br=text.match(/\{[\s\S]*\}/); raw=br?br[0]:null; }
+    if(!raw) return null;
+    const obj=JSON.parse(raw);
+    let days=obj.days||obj.giorni||(obj.scheda&&(obj.scheda.days||obj.scheda.giorni));
+    if(!Array.isArray(days)) return null;
+    const nameIdx={}; EXERCISES.forEach(e=>{ nameIdx[Media.norm(e.name)]=e.id; });
+    const resolveId=(e)=>{
+      if(typeof e==='string'){ e={nome:e}; }
+      if(e.exId&&EX_BY_ID[e.exId]) return e.exId;
+      const n=Media.norm(e.nome||e.name||e.esercizio||'');
+      if(!n) return null;
+      if(nameIdx[n]) return nameIdx[n];
+      let best=null,score=0; const qt=n.split(' ');
+      for(const k in nameIdx){ const kt=k.split(' '); const hit=qt.filter(t=>kt.includes(t)).length; if(hit>score){score=hit;best=nameIdx[k];} }
+      return score>=1?best:null;
+    };
+    const out=days.map(d=>{
+      const exs=(d.exercises||d.esercizi||[]).map(e=>{ const id=resolveId(e);
+        return id?{exId:id, sets:+(e.sets||e.serie)||3, reps:String(e.reps||e.ripetizioni||'10')}:null; }).filter(Boolean);
+      return { type:String(d.type||d.id||'A').toUpperCase().slice(0,2), name:d.name||d.nome||'Allenamento',
+        muscleGroup:d.muscleGroup||d.gruppo||'core', exercises:exs };
+    }).filter(d=>d.exercises.length);
+    return out.length?{days:out}:null;
   } catch(e){ return null; }
+}
+function showPlanSheet(plan){
+  window._pendingPlan=plan;
+  openSheet(`<h3>📋 Scheda proposta dall'AI</h3>
+    <p class="small muted">Controlla e applica per aggiornare davvero la tua scheda nell'app.</p>
+    ${plan.days.map(d=>`<div class="card"><b class="acc-${d.type}">Giorno ${d.type} — ${esc(d.name)}</b>
+      ${d.exercises.map(e=>`<div class="small muted">• ${esc((EX_BY_ID[e.exId]||{}).name||e.exId)} — ${e.sets}×${esc(e.reps)}</div>`).join('')}</div>`).join('')}
+    <button class="btn ok block" onclick='applyPlan()'>✅ Approva e applica</button>
+    <button class="btn ghost block small" onclick="closeSheet()">Annulla</button>`);
 }
 window.applyPlan = function(){
   const p=window._pendingPlan; if(!p) return;
@@ -934,6 +1020,10 @@ window.applyPlan = function(){
 VIEWS.impostazioni = function(){
   const s=settings();
   let h=`<div class="topbar"><h1>Impostazioni</h1></div>`;
+  h+=`<h2>🎨 Aspetto</h2><div class="card"><div class="row" style="gap:8px">
+    ${[['light','☀️ Chiaro'],['dark','🌙 Scuro'],['auto','⚙️ Auto']].map(([v,l])=>
+      `<button class="chip ${ (s.theme||'light')===v?'on':''}" style="flex:1;justify-content:center" onclick="setTheme('${v}')">${l}</button>`).join('')}
+  </div><div class="tiny muted" style="margin-top:8px">"Auto" segue le impostazioni del telefono (chiaro di giorno, scuro di sera).</div></div>`;
   h+=`<div class="card">
     <label class="fld">Nome utente</label><input id="s-name" value="${esc(s.userName)}">
     <label class="fld">Email notifiche</label><input id="s-email" value="${esc(s.email)}">
@@ -988,8 +1078,9 @@ window.saveGeneral=function(){ const s=settings(); s.userName=$('#s-name').value
 window.saveAI=function(){ const s=settings();
   const k=$('#s-key').value.trim(); if(k) s.claudeApiKey=k;   // vuoto = non cambiare
   s.claudeModel=$('#s-model').value.trim()||'claude-sonnet-4-6';
-  s.claudeProxyUrl=$('#s-proxy').value.trim();
+  s.claudeProxyUrl=normalizeUrl($('#s-proxy').value.trim());
   saveSettings(s); toast((s.claudeApiKey||s.claudeProxyUrl)?'AI salvato ✅':'AI salvato'); VIEWS.impostazioni(); };
+function normalizeUrl(u){ if(!u) return ''; if(!/^https?:\/\//i.test(u)) u='https://'+u; return u.replace(/\/+$/,''); }
 window.clearKey=function(){ const s=settings(); s.claudeApiKey=''; saveSettings(s); toast('Chiave rimossa'); VIEWS.impostazioni(); };
 window.saveEmail=function(){ const s=settings(); s.emailjsServiceId=$('#s-sid').value.trim(); s.emailjsTemplateId=$('#s-tid').value.trim(); s.emailjsUserId=$('#s-uid').value.trim(); saveSettings(s); toast('EmailJS salvato'); };
 
@@ -1116,6 +1207,7 @@ function autoCheckPlanAge(){
 function init(){
   // register SW
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+  applyTheme();
   ingestHealthParams(); // importa dati salute passati via URL (Scorciatoia iOS)
   Media.load().then(()=>{ // re-render current view once images resolve
     const act=$('#tabbar button.active'); if(act) go(act.dataset.tab);
