@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#0f0f0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GymTracker">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <title>GymTracker — Tommy</title>
+</head>
+<body>
+  <div id="app">
+    <section id="view-scheda" class="view active"></section>
+    <section id="view-calendario" class="view"></section>
+    <section id="view-libreria" class="view"></section>
+    <section id="view-progressi" class="view"></section>
+    <section id="view-impostazioni" class="view"></section>
+  </div>
+
+  <nav id="tabbar">
+    <button data-tab="scheda" class="active"><span class="ic">🏋️</span>Scheda</button>
+    <button data-tab="calendario"><span class="ic">📅</span>Calendario</button>
+    <button data-tab="libreria"><span class="ic">📚</span>Esercizi</button>
+    <button data-tab="progressi"><span class="ic">📊</span>Progressi AI</button>
+    <button data-tab="impostazioni"><span class="ic">⚙️</span>Impostazioni</button>
+  </nav>
+
+  <div id="sheet-bg" class="sheet-bg"></div>
+  <div id="sheet" class="sheet"><div class="grip"></div><div id="sheet-content"></div></div>
+  <div id="toast" class="toast"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
