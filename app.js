@@ -2,12 +2,42 @@
    GymTracker — application logic (vanilla JS)
    ============================================================ */
 
-/* ---------- Storage ---------- */
+/* ---------- Storage (per-profilo) ---------- */
+const GLOBAL_KEYS = new Set(['profiles','activeProfile','fdbIndex']);
 const DB = {
-  get(k, def){ try { const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v); } catch(e){ return def; } },
-  set(k, v){ localStorage.setItem(k, JSON.stringify(v)); },
-  del(k){ localStorage.removeItem(k); }
+  _k(k){ return GLOBAL_KEYS.has(k) ? k : ('pf:'+(localStorage.getItem('activeProfile')||'default')+':'+k); },
+  get(k, def){ try { const v = localStorage.getItem(this._k(k)); return v==null ? def : JSON.parse(v); } catch(e){ return def; } },
+  set(k, v){ localStorage.setItem(this._k(k), JSON.stringify(v)); },
+  del(k){ localStorage.removeItem(this._k(k)); }
 };
+
+/* ---------- Profili ---------- */
+function profiles(){ try{ return JSON.parse(localStorage.getItem('profiles')||'[]'); }catch(e){ return []; } }
+function saveProfiles(list){ localStorage.setItem('profiles', JSON.stringify(list)); }
+function activeProfileId(){ return localStorage.getItem('activeProfile')||'default'; }
+function activeProfile(){ const list=profiles(); return list.find(p=>p.id===activeProfileId())||list[0]||{id:'default',name:'Tommy'}; }
+function migrateProfiles(){
+  if(localStorage.getItem('profiles')) return;
+  const DATA=['activeWorkoutPlan','workoutLog','bodyMetrics','settings','progressPhotos','chatHistory','currentSession','expressMode','warmupOpen','stagnationNotified','planAgeNotified','trainReminded'];
+  localStorage.setItem('activeProfile','default');
+  let hadData=false;
+  DATA.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null){ localStorage.setItem('pf:default:'+k, v); localStorage.removeItem(k); hadData=true; } });
+  let nm='Tommy'; try{ nm=JSON.parse(localStorage.getItem('pf:default:settings')||'{}').userName||'Tommy'; }catch(e){}
+  saveProfiles([{id:'default', name:nm, sex:'m'}]);
+  if(hadData) localStorage.setItem('pf:default:onboarded','true'); // utente esistente: niente intervista forzata
+}
+function switchProfile(id){ localStorage.setItem('activeProfile',id); curDayIdx=0; applyTheme(); closeSheet(); go('scheda'); toast('Profilo: '+(activeProfile().name||'')); }
+function createProfile(name, sex){
+  const id='p'+Date.now().toString(36); const list=profiles();
+  list.push({id, name:name||'Nuovo', sex:sex||'m'}); saveProfiles(list);
+  localStorage.setItem('activeProfile', id);
+  const def={ userName:name||'Nuovo', email:'', planStartDate:today(), lastPlanChange:today(),
+    emailjsServiceId:'', emailjsTemplateId:'', emailjsUserId:'', claudeApiKey:'', claudeModel:'claude-sonnet-4-6',
+    notifyWeeks:6, trainingDays:[1,2,4,6], theme: (settingsRaw()||{}).theme||'light', sex:sex||'m' };
+  localStorage.setItem(DB._k('settings'), JSON.stringify(def));
+  return id;
+}
+function settingsRaw(){ try{ return JSON.parse(localStorage.getItem(DB._k('settings'))||'null'); }catch(e){ return null; } }
 
 function ymd(d){ const x=new Date(d); x.setMinutes(x.getMinutes()-x.getTimezoneOffset()); return x.toISOString().slice(0,10); }
 const today = () => ymd(new Date());
@@ -34,6 +64,121 @@ function settings(){
 }
 function applyTheme(){ document.documentElement.dataset.theme = settings().theme || 'light'; }
 window.setTheme = function(t){ const s=settings(); s.theme=t; saveSettings(s); applyTheme(); VIEWS.impostazioni(); };
+
+/* ============================================================
+   Onboarding interview + plan generator
+   ============================================================ */
+const INTERVIEW=[
+  {k:'name', q:'Come ti chiami?', type:'text', ph:'Il tuo nome'},
+  {k:'sex', q:'Sesso', type:'choice', opts:[['m','♂ Uomo'],['f','♀ Donna'],['x','Preferisco non dirlo']]},
+  {k:'age', q:'Quanti anni hai?', type:'number', ph:'Età'},
+  {k:'goal', q:'Qual è il tuo obiettivo principale?', type:'choice', opts:[['definizione','Definizione / asciutto'],['massa','Aumento massa'],['dimagrimento','Dimagrimento'],['tonificazione','Tonificazione'],['forza','Forza']]},
+  {k:'place', q:'Dove ti alleni?', type:'choice', opts:[['palestra','🏋️ Palestra'],['casa','🏠 Casa'],['entrambi','Entrambi']]},
+  {k:'equip', q:'Che attrezzatura hai a disposizione?', type:'multi', opts:[['Rack','Bilanciere / Rack'],['Manubri','Manubri'],['Multi-power','Multi-power / Cavi'],['Spin Bike','Spin bike'],['Elastici','Elastici'],['Corpo libero','Corpo libero']]},
+  {k:'freq', q:'Quante volte a settimana vuoi allenarti?', type:'choice', opts:[['2','2 volte'],['3','3 volte'],['4','4 volte'],['5','5 volte']]},
+  {k:'level', q:'Il tuo livello di esperienza', type:'choice', opts:[['Principiante','Principiante'],['Intermedio','Intermedio'],['Avanzato','Avanzato']]},
+  {k:'notes', q:'Limitazioni o preferenze? (opzionale)', type:'text', ph:'Es: mal di schiena, niente salti, focus glutei...'}
+];
+const SPLITS={
+  2:[ {type:'A',name:'Full Body A',groups:['petto','schiena','spalle','core']},
+      {type:'B',name:'Full Body B',groups:['gambe','glutei','bicipiti','tricipiti']} ],
+  3:[ {type:'A',name:'Spinta · Petto/Spalle/Tricipiti',groups:['petto','spalle','tricipiti']},
+      {type:'B',name:'Tirata · Schiena/Bicipiti',groups:['schiena','bicipiti']},
+      {type:'C',name:'Gambe & Glutei',groups:['gambe','glutei','core']} ],
+  4:[ {type:'A',name:'Petto + Tricipiti',groups:['petto','tricipiti']},
+      {type:'B',name:'Schiena + Bicipiti',groups:['schiena','bicipiti']},
+      {type:'C',name:'Gambe + Spalle',groups:['gambe','glutei','spalle']},
+      {type:'D',name:'Full Body + Core',groups:['petto','schiena','gambe','core']} ],
+  5:[ {type:'A',name:'Petto + Tricipiti',groups:['petto','tricipiti']},
+      {type:'B',name:'Schiena + Bicipiti',groups:['schiena','bicipiti']},
+      {type:'C',name:'Gambe',groups:['gambe','core']},
+      {type:'D',name:'Spalle + Braccia',groups:['spalle','bicipiti','tricipiti']},
+      {type:'E',name:'Glutei + Core',groups:['glutei','gambe','core']} ]
+};
+function freqToDays(f){ return ({2:[1,4],3:[1,3,5],4:[1,2,4,6],5:[1,2,3,5,6]})[f]||[1,2,4,6]; }
+function buildPlanFromInterview(a){
+  const freq=Math.min(5,Math.max(2,+a.freq||4));
+  const available=(a.equip&&a.equip.length?a.equip.slice():['Corpo libero']);
+  if(!available.includes('Corpo libero')) available.push('Corpo libero');
+  const female=a.sex==='f';
+  const reps=({definizione:'12-15',dimagrimento:'12-15',tonificazione:'12-15',massa:'8-10',forza:'5-6'})[a.goal]||'10-12';
+  const tmpl=SPLITS[freq]||SPLITS[4]; const set=new Set(available);
+  const days=tmpl.map(d=>{
+    let groups=d.groups.slice();
+    if(female && groups.includes('gambe') && !groups.includes('glutei')) groups.unshift('glutei');
+    const picks=[]; let gi=0, guard=0;
+    while(picks.length<6 && guard<300){ guard++;
+      const g=groups[gi%groups.length]; gi++;
+      const cand=EXERCISES.find(e=>e.cat===g && e.equip.some(q=>set.has(q)) && !picks.find(p=>p.exId===e.id));
+      if(cand) picks.push({exId:cand.id, sets:picks.length===0?4:3, reps});
+      if(gi>groups.length*8) break;
+    }
+    return {type:d.type, name:d.name, muscleGroup:groups[0], exercises:picks};
+  }).filter(d=>d.exercises.length);
+  return {version:1, startDate:today(), days};
+}
+
+let onboardState={ i:0, ans:{} };
+window.startOnboarding=function(prefill){
+  onboardState={ i:0, ans: prefill? JSON.parse(JSON.stringify(prefill)) : {} };
+  $('#onboard').classList.remove('hidden'); document.body.style.overflow='hidden';
+  renderOnboard();
+};
+function closeOnboard(){ $('#onboard').classList.add('hidden'); document.body.style.overflow=''; }
+function renderOnboard(){
+  const step=INTERVIEW[onboardState.i]; const ans=onboardState.ans; const v=ans[step.k];
+  const total=INTERVIEW.length;
+  let body='';
+  if(step.type==='choice'){
+    body=step.opts.map(([val,lbl])=>`<button class="ob-opt ${v===val?'on':''}" onclick="obChoose('${step.k}','${val}')">${esc(lbl)}</button>`).join('');
+  } else if(step.type==='multi'){
+    const arr=Array.isArray(v)?v:[];
+    body=step.opts.map(([val,lbl])=>`<button class="ob-opt ${arr.includes(val)?'on':''}" onclick="obToggle('${step.k}','${val}')">${esc(lbl)}</button>`).join('')
+      +`<button class="btn primary block" style="margin-top:14px" onclick="obNext()">Avanti</button>`;
+  } else {
+    body=`<input id="ob-input" type="${step.type==='number'?'number':'text'}" placeholder="${esc(step.ph||'')}" value="${esc(v||'')}" style="font-size:18px;padding:14px">
+      <button class="btn primary block" style="margin-top:14px" onclick="obNextInput()">${onboardState.i===total-1?'Crea la mia scheda 🚀':'Avanti'}</button>
+      ${step.k==='notes'?`<button class="btn ghost block sm" style="margin-top:8px" onclick="ans_skip_notes()">Salta</button>`:''}`;
+  }
+  $('#onboard').innerHTML=`
+    <div class="ob-top">
+      ${onboardState.i>0?`<button class="btn x" onclick="obBack()">‹</button>`:`<button class="btn x" onclick="closeOnboard()">✕</button>`}
+      <div class="pl-dots">${INTERVIEW.map((_,k)=>`<i class="${k<onboardState.i?'done':''} ${k===onboardState.i?'cur':''}"></i>`).join('')}</div>
+    </div>
+    <div class="ob-body">
+      <div class="ob-step">Domanda ${onboardState.i+1} di ${total}</div>
+      <h2 class="ob-q">${esc(step.q)}</h2>
+      <div class="ob-opts">${body}</div>
+    </div>`;
+  const inp=$('#ob-input'); if(inp) setTimeout(()=>inp.focus(),50);
+}
+window.obChoose=(k,val)=>{ onboardState.ans[k]=val; obAdvance(); };
+window.obToggle=(k,val)=>{ const a=onboardState.ans; a[k]=Array.isArray(a[k])?a[k]:[]; if(a[k].includes(val)) a[k]=a[k].filter(x=>x!==val); else a[k].push(val); renderOnboard(); };
+window.obNext=()=>obAdvance();
+window.obNextInput=()=>{ const inp=$('#ob-input'); const step=INTERVIEW[onboardState.i]; if(inp) onboardState.ans[step.k]=inp.value.trim(); obAdvance(); };
+window.ans_skip_notes=()=>{ obAdvance(); };
+window.obBack=()=>{ if(onboardState.i>0){ onboardState.i--; renderOnboard(); } };
+function obAdvance(){ if(onboardState.i<INTERVIEW.length-1){ onboardState.i++; renderOnboard(); } else finishOnboard(); }
+async function finishOnboard(){
+  const a=onboardState.ans;
+  const s=settings();
+  s.userName=a.name||s.userName; s.sex=a.sex||'m'; s.interview=a; s.trainingDays=freqToDays(+a.freq||4);
+  saveSettings(s);
+  const list=profiles(); const p=list.find(x=>x.id===activeProfileId()); if(p){ p.name=a.name||p.name; p.sex=a.sex; saveProfiles(list); }
+  const plan=buildPlanFromInterview(a); DB.set('activeWorkoutPlan',plan); DB.del('currentSession');
+  DB.set('onboarded', true);
+  closeOnboard(); curDayIdx=0; go('scheda'); toast('Scheda creata su misura 💪');
+  if(settings().claudeApiKey||settings().claudeProxyUrl){ setTimeout(()=>aiRefineFromInterview(a),500); }
+}
+async function aiRefineFromInterview(a){
+  const eq=(a.equip||[]).join(', ');
+  const msg=`Crea la scheda di allenamento ideale per questo profilo. Sesso: ${a.sex}. Età: ${a.age}. Obiettivo: ${a.goal}. Si allena: ${a.place}. Attrezzatura: ${eq}. Frequenza: ${a.freq} volte/settimana. Livello: ${a.level}. Note: ${a.notes||'nessuna'}. Genera ${a.freq} giorni adeguati. Rispondi con una breve spiegazione e poi il blocco JSON della scheda.`;
+  pushChat('user','[Intervista] '+msg);
+  pushChat('assistant','Sto preparando la tua scheda personalizzata… ⏳');
+  const reply=await callClaude(msg);
+  const h=DB.get('chatHistory',[]); h[h.length-1]={role:'assistant',content:reply}; DB.set('chatHistory',h);
+  const plan=extractPlan(reply); if(plan) showPlanSheet(plan);
+}
 function getTrainingDays(){ const t=settings().trainingDays; return Array.isArray(t)?t:[1,2,4,6]; }
 const WD_SHORT = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
 const WD_LONG  = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
@@ -1128,6 +1273,18 @@ window.applyPlan = function(){
 VIEWS.impostazioni = function(){
   const s=settings();
   let h=`<div class="topbar"><h1>Impostazioni</h1></div>`;
+  h+=`<h2>👤 Profilo</h2><div class="card">
+    <label class="fld">Profilo attivo</label>
+    <select onchange="switchProfile(this.value)">
+      ${profiles().map(p=>`<option value="${p.id}" ${p.id===activeProfileId()?'selected':''}>${esc(p.name)}${p.sex==='f'?' ♀':p.sex==='m'?' ♂':''}</option>`).join('')}
+    </select>
+    <div class="row" style="gap:8px;margin-top:10px">
+      <button class="btn sm" style="flex:1" onclick="newProfileSheet()">+ Nuovo profilo</button>
+      <button class="btn sm" style="flex:1" onclick="startOnboarding(settings().interview)">✏️ Rifai intervista</button>
+    </div>
+    ${profiles().length>1?`<button class="btn ghost block sm" style="margin-top:8px" onclick="deleteProfileSheet()">🗑 Elimina profilo attivo</button>`:''}
+    <div class="tiny muted" style="margin-top:8px">Ogni profilo ha scheda e dati separati. Crea un profilo finto per testare l'intervista senza toccare il tuo.</div>
+  </div>`;
   h+=`<h2>🎨 Aspetto</h2><div class="card"><div class="row" style="gap:8px">
     ${[['light','☀️ Chiaro'],['dark','🌙 Scuro'],['auto','⚙️ Auto']].map(([v,l])=>
       `<button class="chip ${ (s.theme||'light')===v?'on':''}" style="flex:1;justify-content:center" onclick="setTheme('${v}')">${l}</button>`).join('')}
@@ -1190,6 +1347,22 @@ VIEWS.impostazioni = function(){
 
   h+=`<p class="tiny muted center" style="margin-top:16px">GymTracker v1.0 · ${EXERCISES.length} esercizi · PWA</p>`;
   $('#view-impostazioni').innerHTML=h;
+};
+window.switchProfile = switchProfile;
+window.newProfileSheet=function(){
+  openSheet(`<h3>Nuovo profilo</h3>
+    <label class="fld">Nome</label><input id="np-name" placeholder="Es. Giulia">
+    <label class="fld">Sesso</label>
+    <select id="np-sex"><option value="m">Uomo</option><option value="f">Donna</option><option value="x">Preferisco non dirlo</option></select>
+    <button class="btn primary block" style="margin-top:12px" onclick="doNewProfile()">Crea e fai l'intervista</button>`);
+};
+window.doNewProfile=function(){ const n=($('#np-name').value||'').trim()||'Nuovo'; const sx=$('#np-sex').value;
+  createProfile(n,sx); closeSheet(); applyTheme(); startOnboarding({name:n,sex:sx}); };
+window.deleteProfileSheet=function(){ if(!confirm('Eliminare il profilo attivo e tutti i suoi dati?')) return;
+  const id=activeProfileId();
+  Object.keys(localStorage).filter(k=>k.indexOf('pf:'+id+':')===0).forEach(k=>localStorage.removeItem(k));
+  const list=profiles().filter(p=>p.id!==id); saveProfiles(list);
+  localStorage.setItem('activeProfile', (list[0]&&list[0].id)||'default'); applyTheme(); go('scheda'); toast('Profilo eliminato');
 };
 window.toggleTD=function(d){ const s=settings(); let t=Array.isArray(s.trainingDays)?s.trainingDays.slice():[1,2,4,6];
   if(t.includes(d)) t=t.filter(x=>x!==d); else t.push(d); t.sort(); s.trainingDays=t; saveSettings(s); VIEWS.impostazioni(); };
@@ -1330,6 +1503,7 @@ function autoCheckPlanAge(){
 function init(){
   // register SW
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+  migrateProfiles();
   applyTheme();
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ const r=$('#rest'); if(r && !r.classList.contains('hidden')) tickRest(); } });
   ingestHealthParams(); // importa dati salute passati via URL (Scorciatoia iOS)
@@ -1340,5 +1514,6 @@ function init(){
   go('scheda');
   autoCheckPlanAge();
   trainingReminder();
+  if(!DB.get('onboarded', false)) window.startOnboarding(); // primo accesso: intervista
 }
 init();
