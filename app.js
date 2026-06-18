@@ -83,6 +83,9 @@ const Cloud = {
   },
   async signup(email,pass){ await this.load(); return this.auth.createUserWithEmailAndPassword(email,pass); },
   async login(email,pass){ await this.load(); return this.auth.signInWithEmailAndPassword(email,pass); },
+  async loginGoogle(){ await this.load(); const prov=new firebase.auth.GoogleAuthProvider();
+    try{ return await this.auth.signInWithPopup(prov); }
+    catch(e){ if(e && (e.code==='auth/popup-blocked'||e.code==='auth/operation-not-supported-in-this-environment'||e.code==='auth/cancelled-popup-request')){ return this.auth.signInWithRedirect(prov); } throw e; } },
   async logout(){ if(this.auth) await this.auth.signOut(); this.user=null; localStorage.setItem('activeProfile','default'); applyTheme(); curDayIdx=0; go('scheda'); },
   async pull(){
     const uid=this.user.uid; const prev=activeProfileId();
@@ -123,6 +126,7 @@ window.fbSignup=async function(){ const e=$('#fb-email').value.trim(), p=$('#fb-
   try{ await Cloud.signup(e,p); toast('Account creato ✅'); }catch(err){ alert('Errore: '+err.message); } };
 window.fbLogin=async function(){ const e=$('#fb-email').value.trim(), p=$('#fb-pass').value;
   try{ await Cloud.login(e,p); toast('Accesso effettuato ✅'); }catch(err){ alert('Errore: '+err.message); } };
+window.fbGoogle=async function(){ try{ await Cloud.loginGoogle(); }catch(err){ alert('Errore Google: '+err.message); } };
 window.fbLogout=async function(){ if(confirm('Disconnettere l\'account? I dati restano sul cloud.')){ await Cloud.logout(); toast('Disconnesso'); VIEWS.impostazioni(); } };
 window.fbSyncNow=function(){ Cloud.push(); toast('Sincronizzazione avviata'); };
 window.fbReset=function(){ if(confirm('Rimuovere la configurazione Firebase da questo dispositivo?')){ localStorage.removeItem('firebaseConfig'); location.reload(); } };
@@ -1434,7 +1438,9 @@ VIEWS.impostazioni = function(){
       <label class="fld">Password</label><input id="fb-pass" type="password" autocomplete="current-password" placeholder="almeno 6 caratteri">
       <div class="row" style="gap:8px;margin-top:12px">
         <button class="btn primary" style="flex:1" onclick="fbLogin()">Accedi</button>
-        <button class="btn" style="flex:1" onclick="fbSignup()">Registrati</button></div>`;
+        <button class="btn" style="flex:1" onclick="fbSignup()">Registrati</button></div>
+      <div class="row" style="align-items:center;gap:10px;margin:12px 0 6px"><div style="flex:1;height:1px;background:var(--border)"></div><span class="tiny muted">oppure</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+      <button class="btn block" onclick="fbGoogle()" style="display:flex;align-items:center;justify-content:center;gap:8px"><span style="font-weight:800;color:#4285F4">G</span> Continua con Google</button>`;
   }
   h+=`</div>`;
 
