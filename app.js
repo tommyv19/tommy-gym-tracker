@@ -7,8 +7,9 @@ const GLOBAL_KEYS = new Set(['profiles','activeProfile','fdbIndex']);
 const DB = {
   _k(k){ return GLOBAL_KEYS.has(k) ? k : ('pf:'+(localStorage.getItem('activeProfile')||'default')+':'+k); },
   get(k, def){ try { const v = localStorage.getItem(this._k(k)); return v==null ? def : JSON.parse(v); } catch(e){ return def; } },
-  set(k, v){ localStorage.setItem(this._k(k), JSON.stringify(v)); },
-  del(k){ localStorage.removeItem(this._k(k)); }
+  set(k, v){ localStorage.setItem(this._k(k), JSON.stringify(v)); this._cloud(k); },
+  del(k){ localStorage.removeItem(this._k(k)); this._cloud(k); },
+  _cloud(k){ if(window.Cloud && Cloud.user && !GLOBAL_KEYS.has(k) && activeProfileId()===Cloud.user.uid) Cloud.push(); }
 };
 
 /* ---------- Profili ---------- */
@@ -38,6 +39,93 @@ function createProfile(name, sex){
   return id;
 }
 function settingsRaw(){ try{ return JSON.parse(localStorage.getItem(DB._k('settings'))||'null'); }catch(e){ return null; } }
+
+/* ============================================================
+   Cloud (Firebase Auth + Firestore) — account email/password,
+   dati sincronizzati per uid. Config inserita in-app.
+   ============================================================ */
+function parseFbConfig(t){
+  t=(t||'').trim(); const m=t.match(/\{[\s\S]*\}/); if(m) t=m[0];
+  try{ return JSON.parse(t); }catch(e){}
+  let s=t.replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g,'$1"$2":').replace(/'/g,'"').replace(/,(\s*[}\]])/g,'$1');
+  return JSON.parse(s);
+}
+// Configurazione del progetto Firebase dell'app (pubblica per natura; la sicurezza è nelle regole Firestore)
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyA_ut2x-Kuua7qiqnxbAXTiwHd8l3OlUWE",
+  authDomain: "gymtracker-tom.firebaseapp.com",
+  projectId: "gymtracker-tom",
+  storageBucket: "gymtracker-tom.firebasestorage.app",
+  messagingSenderId: "749812349718",
+  appId: "1:749812349718:web:c94f30c004826b21e7ae37"
+};
+const Cloud = {
+  loaded:false, user:null, auth:null, fs:null, _t:null,
+  keys:['activeWorkoutPlan','workoutLog','bodyMetrics','settings','chatHistory','bestLifts','lastKudos','expressMode','warmupOpen','onboarded'],
+  config(){ try{ const ov=localStorage.getItem('firebaseConfig'); if(ov) return JSON.parse(ov); }catch(e){} return FIREBASE_CONFIG; },
+  async load(){
+    if(this.loaded) return true;
+    const cfg=this.config(); if(!cfg) return false;
+    const base='https://www.gstatic.com/firebasejs/10.12.2/';
+    for(const f of ['firebase-app-compat.js','firebase-auth-compat.js','firebase-firestore-compat.js']){
+      await new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=base+f; sc.onload=res; sc.onerror=rej; document.head.appendChild(sc); });
+    }
+    firebase.initializeApp(cfg); this.auth=firebase.auth(); this.fs=firebase.firestore();
+    this.loaded=true; return true;
+  },
+  async init(){
+    if(!await this.load()) return;
+    this.auth.onAuthStateChanged(async (u)=>{
+      this.user=u||null;
+      if(u){ try{ await this.pull(); }catch(e){ console.warn('pull',e); } curDayIdx=recommendedDayIdx(); go('scheda'); }
+      renderAuthState();
+    });
+  },
+  async signup(email,pass){ await this.load(); return this.auth.createUserWithEmailAndPassword(email,pass); },
+  async login(email,pass){ await this.load(); return this.auth.signInWithEmailAndPassword(email,pass); },
+  async logout(){ if(this.auth) await this.auth.signOut(); this.user=null; localStorage.setItem('activeProfile','default'); applyTheme(); curDayIdx=0; go('scheda'); },
+  async pull(){
+    const uid=this.user.uid; const prev=activeProfileId();
+    let list=profiles(); if(!list.find(p=>p.id===uid)){ list.push({id:uid, name:this.user.email||'Account', sex:(settingsRaw()||{}).sex||'m', cloud:true}); saveProfiles(list); }
+    const ref=this.fs.collection('users').doc(uid); const snap=await ref.get();
+    if(snap.exists && snap.data().data){
+      const data=snap.data().data;
+      localStorage.setItem('activeProfile', uid);
+      this.keys.forEach(k=>{ if(data[k]!==undefined) localStorage.setItem('pf:'+uid+':'+k, JSON.stringify(data[k])); });
+    } else {
+      const blob={};
+      this.keys.forEach(k=>{ const v=localStorage.getItem('pf:'+prev+':'+k); if(v!=null){ localStorage.setItem('pf:'+uid+':'+k, v); try{blob[k]=JSON.parse(v);}catch(e){} } });
+      localStorage.setItem('activeProfile', uid);
+      await ref.set({ data:blob, email:this.user.email, updatedAt:Date.now() });
+    }
+    applyTheme();
+  },
+  push(){
+    if(!this.user || !this.fs) return;
+    clearTimeout(this._t);
+    this._t=setTimeout(async ()=>{
+      const uid=this.user.uid; const blob={};
+      this.keys.forEach(k=>{ const v=localStorage.getItem('pf:'+uid+':'+k); if(v!=null){ try{blob[k]=JSON.parse(v);}catch(e){} } });
+      try{ await this.fs.collection('users').doc(uid).set({ data:blob, email:this.user.email, updatedAt:Date.now() }); }catch(e){ console.warn('push',e); }
+    }, 1500);
+  }
+};
+window.Cloud = Cloud;
+function renderAuthState(){ const a=$('#tabbar button.active'); if(a && a.dataset.tab==='impostazioni') VIEWS.impostazioni(); }
+
+window.saveFbConfig=function(){
+  try{ const o=parseFbConfig($('#fb-config').value); if(!o.apiKey||!o.projectId) throw new Error('mancano apiKey/projectId');
+    localStorage.setItem('firebaseConfig', JSON.stringify(o)); toast('Config salvata'); Cloud.loaded=false; Cloud.init(); VIEWS.impostazioni();
+  }catch(e){ alert('Configurazione non valida: '+e.message); }
+};
+window.fbSignup=async function(){ const e=$('#fb-email').value.trim(), p=$('#fb-pass').value;
+  if(!e||!p){ alert('Inserisci email e password (min 6 caratteri)'); return; }
+  try{ await Cloud.signup(e,p); toast('Account creato ✅'); }catch(err){ alert('Errore: '+err.message); } };
+window.fbLogin=async function(){ const e=$('#fb-email').value.trim(), p=$('#fb-pass').value;
+  try{ await Cloud.login(e,p); toast('Accesso effettuato ✅'); }catch(err){ alert('Errore: '+err.message); } };
+window.fbLogout=async function(){ if(confirm('Disconnettere l\'account? I dati restano sul cloud.')){ await Cloud.logout(); toast('Disconnesso'); VIEWS.impostazioni(); } };
+window.fbSyncNow=function(){ Cloud.push(); toast('Sincronizzazione avviata'); };
+window.fbReset=function(){ if(confirm('Rimuovere la configurazione Firebase da questo dispositivo?')){ localStorage.removeItem('firebaseConfig'); location.reload(); } };
 
 function ymd(d){ const x=new Date(d); x.setMinutes(x.getMinutes()-x.getTimezoneOffset()); return x.toISOString().slice(0,10); }
 const today = () => ymd(new Date());
@@ -1332,6 +1420,24 @@ VIEWS.impostazioni = function(){
     ${profiles().length>1?`<button class="btn ghost block sm" style="margin-top:8px" onclick="deleteProfileSheet()">🗑 Elimina profilo attivo</button>`:''}
     <div class="tiny muted" style="margin-top:8px">Ogni profilo ha scheda e dati separati. Crea un profilo finto per testare l'intervista senza toccare il tuo.</div>
   </div>`;
+
+  // ---- Account cloud (Firebase) ----
+  h+=`<h2>☁️ Account</h2><div class="card">`;
+  if(Cloud.user){
+    h+=`<div class="small" style="color:var(--ok)">✅ Connesso come <b>${esc(Cloud.user.email||'')}</b></div>
+      <div class="tiny muted" style="margin-top:4px">I tuoi dati si sincronizzano in automatico sul cloud e ti seguono su ogni dispositivo.</div>
+      <button class="btn block sm" style="margin-top:10px" onclick="fbSyncNow()">🔄 Sincronizza ora</button>
+      <button class="btn ghost block sm" style="margin-top:8px" onclick="fbLogout()">Esci dall'account</button>`;
+  } else {
+    h+=`<div class="tiny muted" style="margin-bottom:8px">Accedi (o registrati la prima volta) per salvare tutto sul cloud e ritrovare i tuoi dati su qualsiasi telefono.</div>
+      <label class="fld">Email</label><input id="fb-email" type="email" autocomplete="username" placeholder="tua@email.com">
+      <label class="fld">Password</label><input id="fb-pass" type="password" autocomplete="current-password" placeholder="almeno 6 caratteri">
+      <div class="row" style="gap:8px;margin-top:12px">
+        <button class="btn primary" style="flex:1" onclick="fbLogin()">Accedi</button>
+        <button class="btn" style="flex:1" onclick="fbSignup()">Registrati</button></div>`;
+  }
+  h+=`</div>`;
+
   h+=`<h2>🎨 Aspetto</h2><div class="card"><div class="row" style="gap:8px">
     ${[['light','☀️ Chiaro'],['dark','🌙 Scuro'],['auto','⚙️ Auto']].map(([v,l])=>
       `<button class="chip ${ (s.theme||'light')===v?'on':''}" style="flex:1;justify-content:center" onclick="setTheme('${v}')">${l}</button>`).join('')}
@@ -1562,5 +1668,6 @@ function init(){
   autoCheckPlanAge();
   trainingReminder();
   if(!DB.get('onboarded', false)) window.startOnboarding(); // primo accesso: intervista
+  Cloud.init().catch(()=>{}); // se configurato, ripristina sessione e sincronizza
 }
 init();
