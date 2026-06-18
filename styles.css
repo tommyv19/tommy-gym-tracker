@@ -47,7 +47,7 @@ button, input, select, textarea { font-family: inherit; font-size: 16px; }
 button { cursor: pointer; border: none; }
 input, select, textarea {
   background: var(--card-2); color: var(--text); border: 1px solid var(--border);
-  border-radius: var(--r-input); padding: 10px 12px; outline: none; width: 100%;
+  border-radius: 12px; padding: 12px 14px; outline: none; width: 100%;
 }
 input:focus, select:focus, textarea:focus { border-color: var(--text-2); }
 
@@ -60,7 +60,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--text-2); }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;
   position: sticky; top: 0; z-index: 20; background: linear-gradient(var(--bg) 70%, transparent);
   padding: 6px 0 12px; }
-.topbar h1 { font-size: 22px; margin: 0; font-weight: 800; letter-spacing: -0.02em; }
+.topbar h1 { font-size: 28px; margin: 0; font-weight: 800; letter-spacing: -0.03em; }
 .topbar .sub { font-size: 13px; color: var(--text-2); margin-top: 2px; }
 
 /* ===== Bottom tab bar ===== */
@@ -87,14 +87,24 @@ input:focus, select:focus, textarea:focus { border-color: var(--text-2); }
 
 /* ===== Cards ===== */
 .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-card);
-  padding: 14px; margin-bottom: 12px; }
+  padding: 15px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+:root[data-theme="dark"] .card { box-shadow: none; }
+@media (prefers-color-scheme: dark){ :root[data-theme="auto"] .card { box-shadow: none; } }
 .card.done { border-color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
 .row { display: flex; align-items: center; gap: 10px; }
 .between { justify-content: space-between; }
 .muted { color: var(--text-2); }
 .small { font-size: 13px; }
 .tiny { font-size: 11.5px; }
-h2 { font-size: 17px; margin: 18px 0 8px; }
+h2 { font-size: 19px; margin: 20px 0 9px; font-weight: 800; letter-spacing: -0.02em; }
+
+/* ===== Segmented control (iOS) ===== */
+.seg { display:flex; gap:4px; background:var(--card-2); border:1px solid var(--border); border-radius:13px; padding:4px; margin-bottom:14px; }
+.seg button { flex:1; border:none; background:transparent; color:var(--text-2); font-size:13.5px; font-weight:700; padding:9px 6px; border-radius:10px; }
+.seg button.on { background:var(--card); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.14); }
+.seg.sub { background:transparent; border:none; padding:0; gap:6px; }
+.seg.sub button { background:var(--card); border:1px solid var(--border); border-radius:var(--r-pill); }
+.seg.sub button.on { background:var(--A); color:#fff; border-color:var(--A); box-shadow:none; }
 h3 { font-size: 15px; margin: 0; }
 
 /* ===== Pills / badges / buttons ===== */
@@ -194,6 +204,17 @@ label.btn.block { display: block; }
 .libcard svg { width: 100%; height: auto; }
 .libcard .nm { font-size: 13px; font-weight: 700; margin-top: 6px; }
 .libcard .cat { font-size: 11px; color: var(--text-2); }
+
+/* ===== Coach FAB ===== */
+.coachfab { position:fixed; right:16px; bottom:calc(var(--tabbar-h) + var(--sab) + 14px); z-index:60;
+  width:54px; height:54px; border-radius:50%; background:var(--A); color:#fff; font-size:25px;
+  box-shadow:0 6px 20px rgba(0,0,0,.28); display:flex; align-items:center; justify-content:center; border:none; }
+.coachfab:active { transform:scale(.92); }
+.coachfab.hidden { display:none; }
+.coach-banner { background:linear-gradient(100deg, rgba(232,71,42,.10), rgba(139,47,201,.08));
+  border:1px solid var(--border); border-radius:16px; padding:12px 14px; margin-bottom:12px; display:flex; gap:10px; align-items:flex-start; }
+.coach-banner .av { font-size:22px; line-height:1; }
+.coach-banner .tx { font-size:13.5px; line-height:1.4; }
 
 /* ===== Onboarding interview ===== */
 .onboard { position:fixed; inset:0; z-index:320; background:var(--bg); display:flex; flex-direction:column;

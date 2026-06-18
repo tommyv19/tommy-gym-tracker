@@ -403,6 +403,8 @@ VIEWS.scheda = function(){
       <div class="tiny muted">${esc(recDay.name)} · è uno dei tuoi giorni di allenamento</div></div></div></div>`;
   }
 
+  h += coachBanner();
+
   // "fai una scheda diversa"
   if (curDayIdx!==recIdx && !doneToday){
     h += `<div class="tiny muted center" style="margin:-4px 0 10px">Stai guardando il Giorno ${day.type} (consigliato: ${recDay.type})</div>`;
@@ -661,6 +663,13 @@ function finishWorkout(){
     startTime: s.startTime, endTime: end, durationMin: dur, exercises: exOut };
   DB.set('workoutLog', log);
   DB.del('currentSession');
+  // PR detection
+  const bests=DB.get('bestLifts',{}); const prs=[];
+  for(const id in exOut){ const top=Math.max(0,...exOut[id].sets.filter(x=>x.done).map(x=>x.kg||0));
+    if(top>0 && top>(bests[id]||0)){ if(bests[id]) prs.push((EX_BY_ID[id]||{}).name||id); bests[id]=top; } }
+  DB.set('bestLifts',bests);
+  if(prs.length) DB.set('lastKudos','🏆 Nuovo record su '+prs.slice(0,2).join(', ')+(prs.length>2?' e altri':'')+'! Stai spingendo forte, '+(settings().userName||'')+'. 💪');
+  else DB.del('lastKudos');
   checkStagnation();
   openSheet(`<h3>🎉 Allenamento completato!</h3>
     <div class="statline" style="margin-top:14px">
@@ -668,11 +677,43 @@ function finishWorkout(){
       <div class="stat"><div class="v">${doneCount}</div><div class="l">Esercizi</div></div>
       <div class="stat"><div class="v">${Math.round(volume)}</div><div class="l">Volume kg</div></div>
     </div>
-    <p class="small muted center" style="margin-top:12px">Salvato nel calendario il ${fmtDate(s.date)}.</p>
+    ${prs.length?`<div class="coach-banner" style="margin-top:14px"><span class="av">🏆</span><span class="tx"><b>Nuovo record!</b> ${esc(prs.slice(0,3).join(', '))} — hai alzato i carichi. Grande!</span></div>`:`<div class="coach-banner" style="margin-top:14px"><span class="av">🤖</span><span class="tx">${esc(coachMessage())}</span></div>`}
+    <p class="small muted center" style="margin-top:10px">Salvato nel calendario il ${fmtDate(s.date)}.</p>
     <button class="btn primary block" onclick="closeSheet();go('calendario')">Vedi nel calendario</button>`);
   VIEWS.scheda();
 }
 window.finishWorkout = finishWorkout;
+
+/* ===== Coach motivazionale ===== */
+function coachMessage(){
+  const log=DB.get('workoutLog',{}); const dates=Object.keys(log).sort();
+  const name=settings().userName||'';
+  const kudos=DB.get('lastKudos',null);
+  if(!dates.length) return `Ciao ${name}! Primo allenamento in vista? Si parte piano e costanti: la regolarità batte tutto. 💪`;
+  if(kudos) return kudos;
+  const last=dates[dates.length-1];
+  const daysSince=Math.floor((Date.now()-new Date(last+'T12:00:00').getTime())/864e5);
+  if(daysSince>=7) return `Bentornato ${name}! Dopo una pausa si riparte con carichi un filo più leggeri e tecnica pulita. Ci sei. 🔥`;
+  if(daysSince>=3) return `${name}, è ora di rimetterci le mani: oggi diamo gas! 💥`;
+  const now=new Date(); const monday=new Date(now); monday.setHours(0,0,0,0); monday.setDate(now.getDate()-((now.getDay()+6)%7));
+  const wk=dates.filter(d=>new Date(d+'T12:00:00')>=monday).length; const target=getTrainingDays().length||4;
+  if(wk>=target) return `Settimana completata (${wk}/${target})! Costanza da vero atleta, ${name}. 🏆`;
+  if(wk>0) return `${wk}/${target} questa settimana — sei in linea, tieni il ritmo! 💪`;
+  return `Forza ${name}, una serie alla volta si costruisce il fisico. 💪`;
+}
+function coachBanner(){ return `<div class="coach-banner"><span class="av">🤖</span><span class="tx">${esc(coachMessage())}</span></div>`; }
+window.openCoach=function(){
+  const has=settings().claudeApiKey||settings().claudeProxyUrl;
+  openSheet(`<h3>🤖 Il tuo Coach</h3>
+    <div class="coach-banner"><span class="av">🤖</span><span class="tx">${esc(coachMessage())}</span></div>
+    ${has?`<input id="coach-q" placeholder="Chiedi qualcosa al coach...">
+      <button class="btn primary block" style="margin-top:10px" onclick="coachAsk()">Invia</button>
+      <button class="btn ghost block sm" style="margin-top:8px" onclick="closeSheet();go('progressi')">Apri chat completa →</button>`
+    :`<button class="btn primary block" style="margin-top:6px" onclick="closeSheet();go('impostazioni')">Configura l'AI per chattare col coach</button>`}`);
+  setTimeout(()=>{ const i=$('#coach-q'); if(i) i.focus(); },60);
+};
+window.coachAsk=function(){ const i=$('#coach-q'); const q=i?i.value.trim():''; if(!q) return; closeSheet(); progressTab='coach'; go('progressi');
+  setTimeout(()=>{ const inp=$('#ai-input'); if(inp){ inp.value=q; window.aiSend(); } },120); };
 
 /* ============================================================
    Guided player — un esercizio alla volta, in sequenza
@@ -984,57 +1025,63 @@ const METRIC_FIELDS = [
   {k:'arms', l:'Braccia (cm)'},
   {k:'thighs', l:'Cosce (cm)'}
 ];
+let progressTab = 'misure';
+window.setProgressTab = (t)=>{ progressTab=t; VIEWS.progressi(); startAnimations(); };
 VIEWS.progressi = function(){
   const metrics = DB.get('bodyMetrics', []);
   const photos = DB.get('progressPhotos', []);
   const last = metrics[metrics.length-1];
-  let h = `<div class="topbar"><h1>Progressi & AI</h1></div>`;
+  let h = `<div class="topbar"><h1>Progressi</h1></div>`;
 
-  // 6-week banner
   const weeks = weeksSincePlanChange();
   if (weeks >= settings().notifyWeeks){
     h += `<div class="notice">⚠️ Sono passate ${weeks} settimane dall'ultima scheda. <b>È ora di cambiare!</b>
-      <button class="btn sm primary" style="margin-top:8px" onclick="go('progressi');requestPlanChange()">Genera nuova scheda</button></div>`;
+      <button class="btn sm primary" style="margin-top:8px" onclick="setProgressTab('coach');requestPlanChange()">Genera nuova scheda</button></div>`;
   }
 
-  // measurements input — tutti i dati Renpho
-  h += `<h2>Misurazioni corporee</h2><div class="card">
-    <div class="grid2">
-      ${METRIC_FIELDS.map(f=>`<div><label class="fld">${f.l}</label>
-        <input type="number" inputmode="decimal" id="m-${f.k}" value="${last&&last[f.k]!=null?last[f.k]:''}"></div>`).join('')}
-    </div>
-    <button class="btn primary block" style="margin-top:12px" onclick="saveMetric()">💾 Salva misurazione di oggi</button>
-    <button class="btn ghost block sm" style="margin-top:8px" onclick="healthSyncInfo()">📲 Sincronizza da Apple Salute / Renpho</button>
-  </div>`;
+  // segmented control
+  const tabs=[['misure','Misure'],['grafici','Grafici'],['foto','Foto'],['coach','Coach']];
+  h += `<div class="seg">${tabs.map(([t,l])=>`<button class="${progressTab===t?'on':''}" onclick="setProgressTab('${t}')">${l}</button>`).join('')}</div>`;
 
-  // charts
-  h += `<div class="scroller" style="margin:4px 0 10px">
-    ${[30,90,180,9999].map(p=>`<button class="chip ${metricPeriod===p?'on':''}" onclick="setPeriod(${p})">${p===9999?'Tutto':p+'gg'}</button>`).join('')}</div>`;
-  h += `<div class="chartbox"><b class="small">Peso (kg)</b>${lineChart(metrics,'weight','#E8472A')}</div>`;
-  h += `<div class="chartbox"><b class="small">Grasso corporeo (%)</b>${lineChart(metrics,'bodyFat','#F5A623')}</div>`;
-
-  // photos
-  h += `<h2>Foto progressi</h2><div class="card">
-    <label class="btn block" style="text-align:center">📷 Carica foto<input type="file" accept="image/*" style="display:none" onchange="addPhoto(this)"></label>`;
-  if (photos.length){
-    h += `<div class="scroller" style="margin-top:10px">`;
-    photos.slice().reverse().forEach((p,i)=>{ h+=`<div style="min-width:110px"><img class="photo-thumb" src="${p.base64}" onclick="viewPhoto(${photos.length-1-i})"><div class="tiny muted center">${fmtDate(p.date)}</div></div>`; });
+  if (progressTab==='misure'){
+    h += `<div class="card">
+      <div class="grid2">
+        ${METRIC_FIELDS.map(f=>`<div><label class="fld">${f.l}</label>
+          <input type="number" inputmode="decimal" id="m-${f.k}" value="${last&&last[f.k]!=null?last[f.k]:''}"></div>`).join('')}
+      </div>
+      <button class="btn primary block" style="margin-top:14px" onclick="saveMetric()">💾 Salva misurazione di oggi</button>
+      <button class="btn ghost block sm" style="margin-top:8px" onclick="healthSyncInfo()">📲 Sincronizza da Apple Salute / Renpho</button>
+    </div>`;
+    if (last) h += `<p class="tiny muted center" style="margin-top:4px">Ultima misurazione: ${fmtDate(last.date)}</p>`;
+  }
+  else if (progressTab==='grafici'){
+    h += `<div class="seg sub">${[30,90,180,9999].map(p=>`<button class="${metricPeriod===p?'on':''}" onclick="setPeriod(${p})">${p===9999?'Tutto':p+'gg'}</button>`).join('')}</div>`;
+    h += `<div class="chartbox"><b class="small">Peso (kg)</b>${lineChart(metrics,'weight','#E8472A')}</div>`;
+    h += `<div class="chartbox"><b class="small">Grasso corporeo (%)</b>${lineChart(metrics,'bodyFat','#F5A623')}</div>`;
+    h += `<div class="chartbox"><b class="small">Massa muscolare (kg)</b>${lineChart(metrics,'muscleMass','#2EAD6B')}</div>`;
+  }
+  else if (progressTab==='foto'){
+    h += `<div class="card">
+      <label class="btn block" style="text-align:center">📷 Carica foto<input type="file" accept="image/*" style="display:none" onchange="addPhoto(this)"></label>`;
+    if (photos.length){
+      h += `<div class="scroller" style="margin-top:12px">`;
+      photos.slice().reverse().forEach((p,i)=>{ h+=`<div style="min-width:120px"><img class="photo-thumb" src="${p.base64}" onclick="viewPhoto(${photos.length-1-i})"><div class="tiny muted center" style="margin-top:4px">${fmtDate(p.date)}</div></div>`; });
+      h += `</div>`;
+      if (photos.length>=2) h += `<button class="btn block sm" style="margin-top:10px" onclick="comparePhotos()">↔️ Confronta due date</button>`;
+    } else { h += `<p class="tiny muted center" style="margin-top:10px">Carica una foto per iniziare il confronto nel tempo.</p>`; }
     h += `</div>`;
-    if (photos.length>=2) h += `<button class="btn block sm" style="margin-top:8px" onclick="comparePhotos()">↔️ Confronta due date</button>`;
   }
-  h += `</div>`;
-
-  // AI coach
-  h += `<h2>🤖 AI Coach</h2>`;
-  h += `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap">
-    <button class="btn sm" onclick="requestPlanChange()">🔄 Richiedi cambio scheda</button>
-    <button class="btn sm" onclick="aiAnalyze()">📈 Analizza progressi</button></div>
-    <div class="chat" id="ai-chat" style="margin-top:12px">${renderChat()}</div>
-    <div class="chat-input">
-      <input type="text" id="ai-input" placeholder="Chiedi al coach..." onkeydown="if(event.key==='Enter')aiSend()">
-      <button class="btn primary" onclick="aiSend()">➤</button></div>
-    ${(settings().claudeApiKey||settings().claudeProxyUrl)?'':'<div class="tiny muted" style="margin-top:8px">⚠️ Configura la API key di Claude (o il Proxy URL) nelle Impostazioni per attivare il coach.</div>'}
-  </div>`;
+  else if (progressTab==='coach'){
+    h += `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="btn sm" onclick="requestPlanChange()">🔄 Cambia scheda</button>
+      <button class="btn sm" onclick="aiAnalyze()">📈 Analizza progressi</button></div>
+      <div class="chat" id="ai-chat" style="margin-top:12px">${renderChat()}</div>
+      <div class="chat-input">
+        <input type="text" id="ai-input" placeholder="Chiedi al coach..." onkeydown="if(event.key==='Enter')aiSend()">
+        <button class="btn primary" onclick="aiSend()">➤</button></div>
+      ${(settings().claudeApiKey||settings().claudeProxyUrl)?'':'<div class="tiny muted" style="margin-top:8px">⚠️ Configura la API key di Claude (o il Proxy URL) nelle Impostazioni per attivare il coach.</div>'}
+    </div>`;
+  }
 
   $('#view-progressi').innerHTML = h;
 };
@@ -1211,7 +1258,7 @@ window.genPlan = async function(type){
   const custom = type==='custom' ? ($('#pc-custom')?.value||'') : '';
   const map={downgrade:'Riduci difficoltà e volume',upgrade:'Aumenta intensità e progressione',cambio:'Cambia completamente gli esercizi mantenendo l\'obiettivo',custom:custom};
   closeSheet();
-  go('progressi');
+  progressTab='coach'; go('progressi');
   pushChat('user','Richiesta cambio scheda: '+(map[type]||type));
   pushChat('assistant','Sto preparando la nuova scheda… ⏳');
   const instruction=`Genera una NUOVA scheda di allenamento (${map[type]||type}). Rispondi prima con una breve spiegazione, poi un blocco JSON con questa struttura: {"days":[{"type":"A","name":"...","muscleGroup":"petto|schiena|gambe|spalle|core|...","exercises":[{"exId":"<id esercizio dalla libreria>","sets":4,"reps":"8-10"}]}]}. Usa SOLO questi exId disponibili: ${EXERCISES.map(e=>e.id).join(', ')}.`;
