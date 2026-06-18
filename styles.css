@@ -103,7 +103,8 @@ h3 { font-size: 15px; margin: 0; }
 .badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-pill); }
 .btn { background: var(--card-2); color: var(--text); border: 1px solid var(--border);
   border-radius: var(--r-pill); padding: 11px 16px; font-weight: 700; font-size: 14px; }
-.btn.block { width: 100%; }
+.btn.block { display: block; width: 100%; text-align: center; }
+label.btn.block { display: block; }
 .btn.primary { background: var(--A); border-color: var(--A); }
 .btn.ok { background: var(--ok); border-color: var(--ok); }
 .btn.warn { background: var(--warn); border-color: var(--warn); color: #1a1a1a; }
@@ -232,6 +233,17 @@ h3 { font-size: 15px; margin: 0; }
 
 /* ===== Muscle map ===== */
 .musclemap svg { width:100%; max-width:300px; height:auto; display:block; margin:0 auto; }
+
+/* ===== Exercise compact list ===== */
+.exlist { display:flex; flex-direction:column; gap:8px; }
+.exli { display:flex; align-items:center; gap:12px; background:var(--card); border:1px solid var(--border);
+  border-radius:14px; padding:8px 12px 8px 8px; }
+.exli:active { transform:scale(.99); }
+.exli-img { width:48px; height:48px; border-radius:10px; object-fit:cover; background:var(--card-2); flex:none; }
+.exli-ph { display:flex; align-items:center; justify-content:center; font-size:20px; }
+.exli-tx { flex:1; min-width:0; }
+.exli-nm { font-size:14px; font-weight:700; }
+.exli-cat { font-size:12px; color:var(--text-2); margin-top:1px; }
 
 /* ===== Charts ===== */
 .chartbox { background: var(--card); border:1px solid var(--border); border-radius:14px; padding:12px; margin-bottom:12px; }

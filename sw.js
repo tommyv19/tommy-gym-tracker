@@ -1,5 +1,5 @@
 /* GymTracker Service Worker — offline-first */
-const CACHE = 'gymtracker-v4';
+const CACHE = 'gymtracker-v5';
 const ASSETS = [
   './',
   './index.html',

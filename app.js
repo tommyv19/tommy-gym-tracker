@@ -9,7 +9,8 @@ const DB = {
   del(k){ localStorage.removeItem(k); }
 };
 
-const today = () => new Date().toISOString().slice(0,10);
+function ymd(d){ const x=new Date(d); x.setMinutes(x.getMinutes()-x.getTimezoneOffset()); return x.toISOString().slice(0,10); }
+const today = () => ymd(new Date());
 const nowISO = () => new Date().toISOString();
 const $ = (s,r=document) => r.querySelector(s);
 const $$ = (s,r=document) => Array.from(r.querySelectorAll(s));
@@ -398,7 +399,7 @@ function renderWeekStrip(){
   monday.setDate(now.getDate()-((now.getDay()+6)%7));
   let h=`<div class="weekstrip">`;
   for(let i=0;i<7;i++){ const d=new Date(monday); d.setDate(monday.getDate()+i);
-    const ds=d.toISOString().slice(0,10); const isToday=ds===today();
+    const ds=ymd(d); const isToday=ds===today();
     const w=log[ds]; const isTrain=getTrainingDays().includes(d.getDay());
     const mark = w?`<span class="wk-let bg-${w.dayType}">${w.dayType}</span>`:(isTrain?`<span class="wk-dot"></span>`:`<span class="wk-dot empty"></span>`);
     h+=`<div class="wk-cell ${isToday?'today':''}"><div class="wk-dow">${WD_SHORT[d.getDay()]}</div><div class="wk-num">${d.getDate()}</div>${mark}</div>`;
@@ -548,7 +549,7 @@ window.startGuided = function(){
 };
 window.closePlayer = function(){
   $('#player').classList.add('hidden'); $('#rest').classList.add('hidden');
-  clearInterval(_rest); document.body.style.overflow=''; VIEWS.scheda();
+  clearInterval(_restInt); document.body.style.overflow=''; VIEWS.scheda();
 };
 function planEntry(exId){ return (activePlan().days[curDayIdx].exercises.find(e=>e.exId===exId))||{}; }
 
@@ -607,19 +608,29 @@ window.playerNext=()=>{ if(guided.i>=guided.seq.length-1){ finishWorkout(); $('#
 window.playerPrev=()=>{ if(guided.i>0){ guided.i--; renderPlayer(); } };
 window.playerSkip=()=>{ if(guided.i>=guided.seq.length-1){ finishWorkout(); $('#player').classList.add('hidden'); document.body.style.overflow=''; return; } guided.i++; renderPlayer(); };
 
-/* rest timer */
-let _rest=null, restT=0;
-function tickRest(){ const e=$('#rest .t'); if(e) e.textContent='00:'+String(Math.max(0,restT)).padStart(2,'0'); }
-function startRest(sec){ restT=sec; const r=$('#rest');
+/* rest timer — basato su orario reale (continua anche se esci dall'app) + suono */
+let _restEnd=0, _restInt=null, _audio=null, _restDone=false;
+function ensureAudio(){ try{ if(!_audio) _audio=new (window.AudioContext||window.webkitAudioContext)(); if(_audio.state==='suspended') _audio.resume(); }catch(e){} return _audio; }
+function beep(){ try{ const c=ensureAudio(); if(!c) return;
+  [0,0.18,0.36].forEach((off,i)=>{ const o=c.createOscillator(), g=c.createGain(); o.connect(g); g.connect(c.destination);
+    o.frequency.value = i===2?1320:880; const t=c.currentTime+off;
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.25,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.15);
+    o.start(t); o.stop(t+0.16); });
+}catch(e){} }
+function restRemaining(){ return Math.max(0, Math.round((_restEnd-Date.now())/1000)); }
+function tickRest(){ const e=$('#rest .t'); const r=restRemaining(); if(e) e.textContent='00:'+String(r).padStart(2,'0');
+  if(r<=0 && !_restDone){ _restDone=true; beep(); if(navigator.vibrate) try{navigator.vibrate([200,80,200]);}catch(e){}
+    clearInterval(_restInt); setTimeout(()=>$('#rest').classList.add('hidden'),700); } }
+function startRest(sec){ _restEnd=Date.now()+sec*1000; _restDone=false; ensureAudio();
+  const r=$('#rest');
   r.innerHTML=`<div class="lbl">RIPOSO</div><div class="t">00:${String(sec).padStart(2,'0')}</div>
     <div class="row"><button class="btn" onclick="addRest(20)">+20s</button>
     <button class="btn primary" onclick="skipRest()">SALTA</button></div>
-    <div class="tiny" style="opacity:.8">Prossima serie a breve</div>`;
-  r.classList.remove('hidden'); clearInterval(_rest);
-  _rest=setInterval(()=>{ restT--; if(restT<=0){ skipRest(); return; } tickRest(); },1000);
+    <div class="tiny" style="opacity:.85">🔔 Suono alla fine · continua anche fuori dall'app</div>`;
+  r.classList.remove('hidden'); clearInterval(_restInt); _restInt=setInterval(tickRest,250); tickRest();
 }
-window.addRest=(s)=>{ restT+=s; tickRest(); };
-window.skipRest=()=>{ clearInterval(_rest); $('#rest').classList.add('hidden'); };
+window.addRest=(s)=>{ _restEnd+=s*1000; _restDone=false; tickRest(); };
+window.skipRest=()=>{ clearInterval(_restInt); $('#rest').classList.add('hidden'); };
 
 /* ============================================================
    TAB 2 — CALENDARIO
@@ -679,8 +690,8 @@ function renderCalStats(log){
   dates.forEach(d=>{ const dt=new Date(d); if(dt.getFullYear()===calYear && dt.getMonth()===calMonth){
     Object.values(log[d].exercises).forEach(ex=>ex.sets.forEach(s=>monthVol+=(s.kg||0)*(s.reps||0))); } });
   // streak
-  let streak=0; let cur=new Date(); cur.setHours(0,0,0,0);
-  for(;;){ const ds=cur.toISOString().slice(0,10); if(log[ds]){streak++; cur.setDate(cur.getDate()-1);} else { if(ds===today()){cur.setDate(cur.getDate()-1); continue;} break; } }
+  let streak=0; let cur=new Date(); cur.setHours(12,0,0,0);
+  for(;;){ const ds=ymd(cur); if(log[ds]){streak++; cur.setDate(cur.getDate()-1);} else { if(ds===today()){cur.setDate(cur.getDate()-1); continue;} break; } }
   return `<div class="statline">
     <div class="stat"><div class="v">${weekCount}/4</div><div class="l">Settimana</div></div>
     <div class="stat"><div class="v">${Math.round(monthVol/1000*10)/10}t</div><div class="l">Volume mese</div></div>
@@ -769,12 +780,16 @@ VIEWS.libreria = function(){
 
   if (!list.length){ h += `<p class="muted center">Nessun esercizio trovato.</p>`; }
   else {
-    h += `<div class="libgrid">`;
+    h += `<div class="exlist">`;
     list.forEach(x=>{
-      h += `<div class="libcard" onclick="openExercise('${x.id}')">
-        ${exerciseMedia(x,'anim')}
-        <div class="nm">${esc(x.name)}</div>
-        <div class="cat">${CATEGORIES.find(c=>c.id===x.cat)?.label||x.cat} · ${x.diff}</div></div>`;
+      const fr = Media.match(x);
+      const thumb = fr ? `<img class="exli-img" src="${fr[0]}" loading="lazy" onerror="this.style.visibility='hidden'">`
+                       : `<span class="exli-img exli-ph">🏋️</span>`;
+      h += `<div class="exli" onclick="openExercise('${x.id}')">
+        ${thumb}
+        <div class="exli-tx"><div class="exli-nm">${esc(x.name)}</div>
+          <div class="exli-cat">${CATEGORIES.find(c=>c.id===x.cat)?.label||x.cat} · ${x.diff}</div></div>
+        <span class="chev">›</span></div>`;
     });
     h += `</div>`;
   }
@@ -1131,6 +1146,19 @@ VIEWS.impostazioni = function(){
     </div>
     <div class="small muted" style="margin-top:10px">Consigliato per iniziare: <b>4 volte a settimana</b> (es. Lun · Mar · Gio · Sab).</div>
     <button class="btn block sm" style="margin-top:10px" onclick="setTrainingDays([1,2,4,6])">Usa Lun · Mar · Gio · Sab</button>
+    ${getTrainingDays().length?`<div class="divider"></div>
+      <div class="tiny muted" style="margin-bottom:6px">Orario promemoria per ogni giorno</div>
+      <div class="grid2">
+        ${getTrainingDays().slice().sort().map(d=>`<div><label class="fld">${WD_LONG[d]}</label>
+          <input type="time" id="tt-${d}" value="${(s.trainingTimes&&s.trainingTimes[d])||'06:30'}" onchange="setTrainingTime(${d},this.value)"></div>`).join('')}
+      </div>
+      <label class="fld">Tipo di promemoria</label>
+      <select id="notifyType" onchange="setNotifyType(this.value)">
+        <option value="push" ${(s.notifyType||'push')==='push'?'selected':''}>🔔 Notifica push (app installata)</option>
+        <option value="email" ${s.notifyType==='email'?'selected':''}>📧 Email (richiede EmailJS)</option>
+        <option value="off" ${s.notifyType==='off'?'selected':''}>🔕 Nessuno</option>
+      </select>
+      <div class="tiny muted" style="margin-top:6px">Su iPhone una web-app non invia notifiche affidabili ad app chiusa: per gli orari fissi aggiungi gli stessi orari come eventi nel <b>Calendario</b>.</div>`:''}
   </div>`;
 
   const keyMask = s.claudeApiKey ? ('✅ Chiave salvata ('+s.claudeApiKey.slice(0,7)+'…'+s.claudeApiKey.slice(-4)+')') : '⚠️ Nessuna chiave salvata';
@@ -1166,6 +1194,8 @@ VIEWS.impostazioni = function(){
 window.toggleTD=function(d){ const s=settings(); let t=Array.isArray(s.trainingDays)?s.trainingDays.slice():[1,2,4,6];
   if(t.includes(d)) t=t.filter(x=>x!==d); else t.push(d); t.sort(); s.trainingDays=t; saveSettings(s); VIEWS.impostazioni(); };
 window.setTrainingDays=function(arr){ const s=settings(); s.trainingDays=arr.slice(); saveSettings(s); toast('Settimana impostata'); VIEWS.impostazioni(); };
+window.setTrainingTime=function(d,v){ const s=settings(); s.trainingTimes=s.trainingTimes||{}; s.trainingTimes[d]=v; saveSettings(s); };
+window.setNotifyType=function(v){ const s=settings(); s.notifyType=v; saveSettings(s); };
 window.saveGeneral=function(){ const s=settings(); s.userName=$('#s-name').value; s.email=$('#s-email').value;
   s.planStartDate=$('#s-start').value; s.notifyWeeks=parseInt($('#s-weeks').value)||6; saveSettings(s); toast('Salvato'); };
 window.saveAI=function(){ const s=settings();
@@ -1301,6 +1331,7 @@ function init(){
   // register SW
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
   applyTheme();
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ const r=$('#rest'); if(r && !r.classList.contains('hidden')) tickRest(); } });
   ingestHealthParams(); // importa dati salute passati via URL (Scorciatoia iOS)
   Media.load().then(()=>{ // re-render current view once images resolve
     const act=$('#tabbar button.active'); if(act) go(act.dataset.tab);
