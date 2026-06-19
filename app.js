@@ -50,6 +50,13 @@ function parseFbConfig(t){
   let s=t.replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g,'$1"$2":').replace(/'/g,'"').replace(/,(\s*[}\]])/g,'$1');
   return JSON.parse(s);
 }
+// Proxy AI integrato (la chiave Anthropic resta sul server Cloudflare): tutti possono usare il coach
+const CLAUDE_PROXY_URL = 'https://gymtracker.tommaso-vallini19.workers.dev/';
+
+// EmailJS integrato (inserisci i 3 valori dal tuo account EmailJS). Lasciali vuoti = email disattivata.
+const EMAILJS = { serviceId:'gymtracker', publicKey:'WZNMvCbHAVMh1vLBL',
+  templates:{ planAge:'template_planage', stagnation:'template_stagnation', manual:'' } };
+
 // Configurazione del progetto Firebase dell'app (pubblica per natura; la sicurezza è nelle regole Firestore)
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA_ut2x-Kuua7qiqnxbAXTiwHd8l3OlUWE",
@@ -74,10 +81,11 @@ const Cloud = {
     this.loaded=true; return true;
   },
   async init(){
-    if(!await this.load()) return;
+    if(!await this.load()){ if(localStorage.getItem('guestMode')) afterReady(); else showAuthGate(); return; }
     this.auth.onAuthStateChanged(async (u)=>{
       this.user=u||null;
-      if(u){ try{ await this.pull(); }catch(e){ console.warn('pull',e); } curDayIdx=recommendedDayIdx(); go('scheda'); }
+      if(u){ localStorage.removeItem('guestMode'); try{ await this.pull(); }catch(e){ console.warn('pull',e); } afterReady(); }
+      else { if(localStorage.getItem('guestMode')) afterReady(); else showAuthGate(); }
       renderAuthState();
     });
   },
@@ -95,14 +103,30 @@ const Cloud = {
       const data=snap.data().data;
       localStorage.setItem('activeProfile', uid);
       this.keys.forEach(k=>{ if(data[k]!==undefined) localStorage.setItem('pf:'+uid+':'+k, JSON.stringify(data[k])); });
+      try{ const ps=await ref.collection('photos').orderBy('ts').get();
+        const arr=ps.docs.map(d=>({id:d.id, date:d.data().date, base64:d.data().base64}));
+        localStorage.setItem('pf:'+uid+':progressPhotos', JSON.stringify(arr)); }catch(e){ console.warn('photos pull',e); }
     } else {
-      const blob={};
-      this.keys.forEach(k=>{ const v=localStorage.getItem('pf:'+prev+':'+k); if(v!=null){ localStorage.setItem('pf:'+uid+':'+k, v); try{blob[k]=JSON.parse(v);}catch(e){} } });
+      // primo accesso, account vuoto: chiedi se caricare i dati già su questo dispositivo
+      const hasLocal = localStorage.getItem('pf:'+prev+':activeWorkoutPlan') && localStorage.getItem('pf:'+prev+':workoutLog');
+      const migrate = hasLocal ? confirm('Vuoi caricare nel tuo nuovo account i dati di allenamento già presenti su questo dispositivo?') : false;
       localStorage.setItem('activeProfile', uid);
-      await ref.set({ data:blob, email:this.user.email, updatedAt:Date.now() });
+      const blob={};
+      if(migrate){
+        this.keys.forEach(k=>{ const v=localStorage.getItem('pf:'+prev+':'+k); if(v!=null){ localStorage.setItem('pf:'+uid+':'+k, v); try{blob[k]=JSON.parse(v);}catch(e){} } });
+        await ref.set({ data:blob, email:this.user.email, updatedAt:Date.now() });
+        try{ const local=JSON.parse(localStorage.getItem('pf:'+prev+':progressPhotos')||'[]'); const out=[];
+          for(const p of local){ const r=await ref.collection('photos').add({date:p.date, base64:p.base64, ts:Date.now()}); out.push({id:r.id, date:p.date, base64:p.base64}); }
+          localStorage.setItem('pf:'+uid+':progressPhotos', JSON.stringify(out)); }catch(e){ console.warn('photos up',e); }
+      } else {
+        await ref.set({ data:{}, email:this.user.email, updatedAt:Date.now() });
+      }
     }
     applyTheme();
   },
+  async addPhoto(date, base64){ if(!this.user) return null;
+    const r=await this.fs.collection('users').doc(this.user.uid).collection('photos').add({date, base64, ts:Date.now()}); return r.id; },
+  async delPhoto(id){ if(!this.user||!id) return; try{ await this.fs.collection('users').doc(this.user.uid).collection('photos').doc(id).delete(); }catch(e){} },
   push(){
     if(!this.user || !this.fs) return;
     clearTimeout(this._t);
@@ -115,6 +139,33 @@ const Cloud = {
 };
 window.Cloud = Cloud;
 function renderAuthState(){ const a=$('#tabbar button.active'); if(a && a.dataset.tab==='impostazioni') VIEWS.impostazioni(); }
+
+// schermata di accesso all'avvio
+function showAuthGate(){
+  const g=$('#auth'); g.classList.remove('hidden'); document.body.style.overflow='hidden';
+  g.innerHTML=`<div class="ob-body" style="margin-top:7vh">
+    <div style="font-size:42px;text-align:center">🏋️</div>
+    <h2 class="ob-q" style="text-align:center;margin:8px 0 2px">GymTracker</h2>
+    <p class="small muted center" style="margin:0 0 20px">Accedi per ritrovare i tuoi dati su ogni dispositivo</p>
+    <label class="fld">Email</label><input id="ga-email" type="email" autocomplete="username" placeholder="tua@email.com">
+    <label class="fld">Password</label><input id="ga-pass" type="password" autocomplete="current-password" placeholder="almeno 6 caratteri">
+    <button class="btn primary block" style="margin-top:14px" onclick="gateLogin()">Accedi</button>
+    <button class="btn block" style="margin-top:8px" onclick="gateSignup()">Crea account</button>
+    <div class="row" style="align-items:center;gap:10px;margin:14px 0"><div style="flex:1;height:1px;background:var(--border)"></div><span class="tiny muted">oppure</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+    <button class="btn block" onclick="gateGoogle()" style="display:flex;align-items:center;justify-content:center;gap:8px"><span style="font-weight:800;color:#4285F4">G</span> Continua con Google</button>
+    <button class="btn ghost block sm" style="margin-top:16px" onclick="skipAuth()">Usa senza account (solo su questo dispositivo)</button>
+  </div>`;
+}
+function hideAuthGate(){ $('#auth').classList.add('hidden'); document.body.style.overflow=''; }
+function afterReady(){
+  hideAuthGate(); curDayIdx = recommendedDayIdx();
+  if(!DB.get('onboarded',false) && !DB.get('activeWorkoutPlan',null)) window.startOnboarding();
+  else go('scheda');
+}
+window.gateLogin=async function(){ const e=$('#ga-email').value.trim(),p=$('#ga-pass').value; try{ await Cloud.login(e,p); }catch(err){ alert('Errore accesso: '+err.message); } };
+window.gateSignup=async function(){ const e=$('#ga-email').value.trim(),p=$('#ga-pass').value; if(!e||!p){alert('Inserisci email e password (min 6 caratteri)');return;} try{ await Cloud.signup(e,p); }catch(err){ alert('Errore registrazione: '+err.message); } };
+window.gateGoogle=async function(){ try{ await Cloud.loginGoogle(); }catch(e){ alert('Errore Google: '+e.message); } };
+window.skipAuth=function(){ localStorage.setItem('guestMode','1'); afterReady(); };
 
 window.saveFbConfig=function(){
   try{ const o=parseFbConfig($('#fb-config').value); if(!o.apiKey||!o.projectId) throw new Error('mancano apiKey/projectId');
@@ -142,6 +193,15 @@ function toast(msg){
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(t._tm); t._tm = setTimeout(()=>t.classList.remove('show'), 2200);
 }
+function ringSVG(pct, color, center){
+  pct=Math.max(0,Math.min(100,pct)); const r=26, c=2*Math.PI*r, off=c*(1-pct/100);
+  return `<svg class="ring" width="66" height="66" viewBox="0 0 66 66">
+    <circle cx="33" cy="33" r="${r}" fill="none" stroke="var(--card-2)" stroke-width="7"/>
+    <circle cx="33" cy="33" r="${r}" fill="none" stroke="${color||'var(--ok)'}" stroke-width="7" stroke-linecap="round"
+      stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 33 33)"/>
+    <text x="33" y="38" text-anchor="middle" font-size="15" font-weight="800" fill="var(--text)">${center!=null?center:Math.round(pct)+'%'}</text></svg>`;
+}
+function eyebrow(label, title){ return `<div class="eyebrow">${esc(label)}</div><div class="secttl">${esc(title)}</div>`; }
 
 /* ---------- Default state bootstrap ---------- */
 function settings(){
@@ -476,23 +536,25 @@ VIEWS.scheda = function(){
 
   h += renderWeekStrip();
 
-  // smart recommendation banner
+  // smart recommendation HERO
   const isTrainingDay = getTrainingDays().includes(new Date().getDay());
   if (doneToday){
-    h += `<div class="card" style="border-color:var(--ok)">
-      <div class="row" style="gap:10px"><span style="font-size:22px">✅</span>
-      <div><b>Oggi hai completato il Giorno ${doneToday.dayType}</b>
-      <div class="tiny muted">Prossimo consigliato: Giorno ${recDay.type} — ${esc(recDay.name)} · ${nextTrainingDayName()}</div></div></div></div>`;
+    h += `<div class="hero done">
+      <div class="badge-day">✅ COMPLETATO OGGI</div>
+      <h2>Giorno ${doneToday.dayType} fatto!</h2>
+      <div class="sub">Prossimo consigliato: Giorno ${recDay.type} — ${esc(recDay.name)} · ${nextTrainingDayName()}</div></div>`;
   } else if (!isTrainingDay){
-    h += `<div class="card">
-      <div class="row" style="gap:10px"><span style="font-size:22px">🛌</span>
-      <div><b>Oggi è giorno di riposo</b>
-      <div class="tiny muted">Prossimo allenamento: ${nextTrainingDayName()} · Giorno ${recDay.type}. Se vuoi allenarti comunque, è già pronto.</div></div></div></div>`;
+    h += `<div class="hero rest">
+      <div class="badge-day">🛌 RIPOSO</div>
+      <h2>Giorno di riposo</h2>
+      <div class="sub">Prossimo allenamento: ${nextTrainingDayName()} · Giorno ${recDay.type}.</div>
+      <button class="start-btn" onclick="startGuided()">Allenati comunque ▶</button></div>`;
   } else {
-    h += `<div class="card acc-${recDay.type}" style="border-color:${DAY_HEX[recDay.type]}">
-      <div class="row" style="gap:10px"><span class="dot bg-${recDay.type}" style="width:14px;height:14px"></span>
-      <div><b style="color:${DAY_HEX[recDay.type]}">Oggi tocca al Giorno ${recDay.type} 💪</b>
-      <div class="tiny muted">${esc(recDay.name)} · è uno dei tuoi giorni di allenamento</div></div></div></div>`;
+    h += `<div class="hero ${recDay.type}">
+      <div class="badge-day">OGGI · ${todayCap}</div>
+      <h2>Giorno ${recDay.type} — ${esc(recDay.name)}</h2>
+      <div class="sub">È uno dei tuoi giorni di allenamento. Pronto a spingere? 💪</div>
+      <button class="start-btn" onclick="startGuided()">▶ Inizia allenamento</button></div>`;
   }
 
   h += coachBanner();
@@ -526,16 +588,14 @@ VIEWS.scheda = function(){
     <div class="tile accent" onclick="startGuided()"><div class="ic">▶️</div><div class="tl">Allenamento</div></div>
     <div class="tile" onclick="openExercise('${stretchId}')"><div class="ic">🧘</div><div class="tl">Stretching</div></div>
   </div>`;
-  h += `<button class="btn primary block" style="margin-bottom:14px" onclick="startGuided()">▶ Inizia allenamento guidato</button>`;
-
-  // progress header
-  h += `<div class="card"><div class="row between" style="margin-bottom:8px">
-      <h3 class="acc-${day.type}">Giorno ${day.type} — ${esc(day.name)}</h3>
-      <span class="pill">${doneEx}/${totalEx} esercizi</span></div>
-      <div class="progbar"><i style="width:${pct}%"></i></div></div>`;
+  // progress ring header
+  h += `<div class="card"><div class="ringrow">
+      ${ringSVG(pct, DAY_HEX[day.type], doneEx+'/'+totalEx)}
+      <div class="rt"><h3 class="acc-${day.type}" style="margin:0 0 2px">Giorno ${day.type} — ${esc(day.name)}</h3>
+        <div class="tiny muted">${doneEx} di ${totalEx} esercizi completati oggi</div></div></div></div>`;
 
   // exercise list (modifica manuale)
-  h += `<h2>Esercizi <span class="tiny muted" style="font-weight:400">· tocca per dettagli e log manuale</span></h2>`;
+  h += eyebrow('Allenamento di oggi','Esercizi');
   exList.forEach((e,i)=>{
     const ex = EX_BY_ID[e.exId]; if (!ex) return;
     const st = s.exercises[e.exId];
@@ -795,7 +855,7 @@ function coachMessage(){
 }
 function coachBanner(){ return `<div class="coach-banner"><span class="av">🤖</span><span class="tx">${esc(coachMessage())}</span></div>`; }
 window.openCoach=function(){
-  const has=settings().claudeApiKey||settings().claudeProxyUrl;
+  const has=aiAvailable();
   openSheet(`<h3>🤖 Il tuo Coach</h3>
     <div class="coach-banner"><span class="av">🤖</span><span class="tx">${esc(coachMessage())}</span></div>
     ${has?`<input id="coach-q" placeholder="Chiedi qualcosa al coach...">
@@ -1036,9 +1096,10 @@ let libFilters = { cat:'', equip:'', diff:'', q:'' };
 VIEWS.libreria = function(){
   let h = `<div class="topbar"><h1>Esercizi</h1><span class="pill">${EXERCISES.length}</span></div>`;
   h += `<input type="text" placeholder="🔍 Cerca esercizio..." value="${esc(libFilters.q)}" oninput="libSearch(this.value)" style="margin-bottom:10px">`;
-  // category chips
-  h += `<div class="scroller" style="margin-bottom:8px"><button class="chip ${!libFilters.cat?'on':''}" onclick="libCat('')">Tutti</button>`;
-  CATEGORIES.forEach(c=> h+=`<button class="chip ${libFilters.cat===c.id?'on':''}" onclick="libCat('${c.id}')">${c.icon} ${c.label}</button>`);
+  // category round icons
+  h += `<div class="catgrid">`;
+  h += `<div class="catcell ${!libFilters.cat?'on':''}" onclick="libCat('')"><div class="circ">🏋️</div><div class="lbl">Tutti</div></div>`;
+  CATEGORIES.forEach(c=> h+=`<div class="catcell ${libFilters.cat===c.id?'on':''}" onclick="libCat('${c.id}')"><div class="circ">${c.icon}</div><div class="lbl">${esc(c.label)}</div></div>`);
   h += `</div>`;
   // equip + diff chips
   h += `<div class="scroller" style="margin-bottom:8px"><button class="chip ${!libFilters.equip?'on':''}" onclick="libEquip('')">Tutta attrezzatura</button>`;
@@ -1171,7 +1232,6 @@ VIEWS.progressi = function(){
       <div class="chat-input">
         <input type="text" id="ai-input" placeholder="Chiedi al coach..." onkeydown="if(event.key==='Enter')aiSend()">
         <button class="btn primary" onclick="aiSend()">➤</button></div>
-      ${(settings().claudeApiKey||settings().claudeProxyUrl)?'':'<div class="tiny muted" style="margin-top:8px">⚠️ Configura la API key di Claude (o il Proxy URL) nelle Impostazioni per attivare il coach.</div>'}
     </div>`;
   }
 
@@ -1226,16 +1286,31 @@ function lineChart(metrics, field, color){
     <text x="${P}" y="${H-2}" fill="#888" font-size="10">${minY}</text></svg>`;
 }
 
-window.addPhoto = function(input){
+function compressImage(file, maxW){
+  return new Promise((res)=>{ const r=new FileReader();
+    r.onload=()=>{ const img=new Image(); img.onload=()=>{
+      const sc=Math.min(1, maxW/img.width); const w=Math.round(img.width*sc), hh=Math.round(img.height*sc);
+      const c=document.createElement('canvas'); c.width=w; c.height=hh; c.getContext('2d').drawImage(img,0,0,w,hh);
+      res(c.toDataURL('image/jpeg',0.7)); };
+      img.onerror=()=>res(r.result); img.src=r.result; };
+    r.readAsDataURL(file);
+  });
+}
+window.addPhoto = async function(input){
   const f=input.files[0]; if(!f) return;
-  const r=new FileReader(); r.onload=()=>{ const arr=DB.get('progressPhotos',[]);
-    arr.push({date:today(), base64:r.result}); DB.set('progressPhotos',arr); toast('Foto salvata'); VIEWS.progressi(); };
-  r.readAsDataURL(f);
+  toast('Carico la foto…');
+  const base64=await compressImage(f, 900);
+  const photo={date:today(), base64};
+  if(window.Cloud && Cloud.user){ try{ photo.id=await Cloud.addPhoto(photo.date, base64); }catch(e){ console.warn(e); } }
+  const arr=DB.get('progressPhotos',[]); arr.push(photo); DB.set('progressPhotos',arr);
+  toast('Foto salvata'); VIEWS.progressi();
 };
 window.viewPhoto = function(i){ const p=DB.get('progressPhotos',[])[i];
   openSheet(`<h3>${fmtDate(p.date)}</h3><img class="photo-thumb" src="${p.base64}">
     <button class="btn block" style="margin-top:10px" onclick="delPhoto(${i})">🗑 Elimina foto</button>`); };
-window.delPhoto = function(i){ const arr=DB.get('progressPhotos',[]); arr.splice(i,1); DB.set('progressPhotos',arr); closeSheet(); VIEWS.progressi(); };
+window.delPhoto = function(i){ const arr=DB.get('progressPhotos',[]); const p=arr[i]; arr.splice(i,1); DB.set('progressPhotos',arr);
+  if(window.Cloud && Cloud.user && p && p.id) Cloud.delPhoto(p.id);
+  closeSheet(); VIEWS.progressi(); };
 window.comparePhotos = function(){
   const arr=DB.get('progressPhotos',[]);
   const opts=arr.map((p,i)=>`<option value="${i}">${fmtDate(p.date)}</option>`).join('');
@@ -1295,19 +1370,19 @@ REGOLA IMPORTANTE PER CAMBIARE LA SCHEDA: quando proponi o modifichi una scheda,
 {"days":[{"type":"A","name":"Petto + Tricipiti","muscleGroup":"petto","exercises":[{"exId":"panca-piana","sets":4,"reps":"8-10"}]}]}
 Usa SOLO valori "exId" presi dalla lista ufficiale fornita nel contesto (campo EXID_DISPONIBILI). Non inventare exId. L'app leggerà quel JSON e mostrerà a Tommy un pulsante per applicare la scheda. Puoi aggiungere testo/spiegazione prima del blocco JSON.`;
 
+function aiAvailable(){ const s=settings(); return !!(s.claudeProxyUrl || CLAUDE_PROXY_URL || s.claudeApiKey); }
 async function callClaude(userMsg, extra){
   const s=settings();
-  if (!s.claudeApiKey && !s.claudeProxyUrl){ return '⚠️ Manca la configurazione AI. Vai in Impostazioni → Claude AI e inserisci la API key oppure il Proxy URL.'; }
   const hist=DB.get('chatHistory',[]).slice(-8).map(m=>({role:m.role, content:m.content}));
   const messages=[...hist, {role:'user', content:(extra?extra+'\n\n':'')+userMsg}];
   const body={ model:s.claudeModel||'claude-sonnet-4-6', max_tokens:1200,
     system: SYS_PROMPT+'\n\n'+buildContext(), messages };
+  let proxy = s.claudeProxyUrl || CLAUDE_PROXY_URL;
+  if (proxy && !/^https?:\/\//i.test(proxy)) proxy='https://'+proxy;
   try {
     let res;
-    if (s.claudeProxyUrl){
-      // il proxy custodisce la chiave lato server (consigliato)
-      let purl=s.claudeProxyUrl; if(!/^https?:\/\//i.test(purl)) purl='https://'+purl;
-      res=await fetch(purl,{ method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body) });
+    if (proxy){
+      res=await fetch(proxy,{ method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body) });
     } else {
       res=await fetch('https://api.anthropic.com/v1/messages',{ method:'POST',
         headers:{'content-type':'application/json','x-api-key':s.claudeApiKey,
@@ -1404,6 +1479,8 @@ window.applyPlan = function(){
   DB.set('activeWorkoutPlan',plan);
   const s=settings(); s.lastPlanChange=today(); saveSettings(s);
   DB.del('currentSession'); closeSheet(); toast('Scheda aggiornata! 💪'); curDayIdx=0; go('scheda');
+  const summary=p.days.map(d=>`Giorno ${d.type} — ${d.name}`).join('\n');
+  sendEmail('manual', summary);
 };
 
 /* ============================================================
@@ -1476,25 +1553,6 @@ VIEWS.impostazioni = function(){
       </select>
       <div class="tiny muted" style="margin-top:6px">Su iPhone una web-app non invia notifiche affidabili ad app chiusa: per gli orari fissi aggiungi gli stessi orari come eventi nel <b>Calendario</b>.</div>`:''}
   </div>`;
-
-  const keyMask = s.claudeApiKey ? ('✅ Chiave salvata ('+s.claudeApiKey.slice(0,7)+'…'+s.claudeApiKey.slice(-4)+')') : '⚠️ Nessuna chiave salvata';
-  h+=`<h2>🤖 Claude AI</h2><div class="card">
-    <div class="small" style="margin-bottom:8px;color:${s.claudeApiKey?'var(--ok)':'var(--warn)'}">${keyMask}</div>
-    <label class="fld">API Key (sk-ant-...) — lascia vuoto per non cambiarla</label>
-    <input id="s-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${s.claudeApiKey?'••• già salvata •••':'incolla qui sk-ant-...'}">
-    <label class="fld">Modello</label><input id="s-model" value="${esc(s.claudeModel)}">
-    <label class="fld">Proxy URL (opzionale, consigliato — vedi sotto)</label>
-    <input id="s-proxy" type="text" autocomplete="off" placeholder="https://...workers.dev" value="${esc(s.claudeProxyUrl||'')}">
-    <div class="tiny muted" style="margin-top:8px">Con il <b>Proxy URL</b> la chiave resta sul server e non serve inserirla qui. Senza proxy, la chiave è salvata solo su questo dispositivo.</div>
-    <button class="btn primary block" style="margin-top:10px" onclick="saveAI()">Salva AI</button>
-    ${s.claudeApiKey?'<button class="btn ghost block sm" style="margin-top:8px" onclick="clearKey()">Rimuovi chiave salvata</button>':''}</div>`;
-
-  h+=`<h2>📧 EmailJS</h2><div class="card">
-    <label class="fld">Service ID</label><input id="s-sid" value="${esc(s.emailjsServiceId)}">
-    <label class="fld">Template ID</label><input id="s-tid" value="${esc(s.emailjsTemplateId)}">
-    <label class="fld">Public Key (User ID)</label><input id="s-uid" value="${esc(s.emailjsUserId)}">
-    <button class="btn block" style="margin-top:10px" onclick="saveEmail()">Salva EmailJS</button>
-    <button class="btn ghost block sm" style="margin-top:8px" onclick="testEmail()">Invia email di test</button></div>`;
 
   h+=`<h2>🔔 Notifiche</h2><div class="card">
     <button class="btn block" onclick="enableNotifications()">Attiva notifiche push</button></div>`;
@@ -1574,22 +1632,22 @@ function loadEmailJS(){
     if(window.emailjs) return resolve(window.emailjs);
     const sc=document.createElement('script');
     sc.src='https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js';
-    sc.onload=()=>{ try{ window.emailjs.init(settings().emailjsUserId); }catch(e){} resolve(window.emailjs); };
+    sc.onload=()=>{ try{ window.emailjs.init(EMAILJS.publicKey); }catch(e){} resolve(window.emailjs); };
     sc.onerror=reject; document.head.appendChild(sc);
   });
 }
-async function sendEmail(reason, planText){
-  const s=settings();
-  if(!s.emailjsServiceId||!s.emailjsTemplateId||!s.emailjsUserId) return false;
+async function sendEmail(kind, planText){
+  const tid=(EMAILJS.templates||{})[kind];
+  if(!EMAILJS.serviceId||!tid||!EMAILJS.publicKey) return false;
+  const s=settings(); if(!s.email) return false;
   try{ const ej=await loadEmailJS();
-    await ej.send(s.emailjsServiceId, s.emailjsTemplateId, {
-      to_email:s.email, user_name:s.userName, date:fmtDate(today()), reason, plan:planText||'',
-      message:`Ciao ${s.userName}, ${reason}. Apri GymTracker per vedere la nuova scheda.`
-    }, s.emailjsUserId);
+    await ej.send(EMAILJS.serviceId, tid, {
+      to_email:s.email, user_name:s.userName||'', date:fmtDate(today()),
+      plan:planText||'', app_url:location.origin+location.pathname
+    }, EMAILJS.publicKey);
     return true;
   }catch(e){ console.warn('email',e); return false; }
 }
-window.testEmail=async function(){ const ok=await sendEmail('Email di test da GymTracker'); toast(ok?'Email inviata':'Configura EmailJS o controlla i dati'); };
 
 /* ============================================================
    Automation triggers
@@ -1610,7 +1668,7 @@ function checkStagnation(){
     if(arr.length>=3 && arr.every(v=>v===arr[0])){
       const s=settings(); const flag=DB.get('stagnationNotified',{});
       if(flag[id]!==arr[0]){ flag[id]=arr[0]; DB.set('stagnationNotified',flag);
-        sendEmail(`Stagnazione rilevata su ${(EX_BY_ID[id]||{}).name||id}: stesso peso per 3 sessioni`);
+        sendEmail('stagnation', `Esercizio fermo: ${(EX_BY_ID[id]||{}).name||id} (stesso peso per 3 sessioni)`);
         toast('💡 Stagnazione rilevata: valuta un cambio scheda'); }
     }
   }
@@ -1650,7 +1708,7 @@ function autoCheckPlanAge(){
     const flag=DB.get('planAgeNotified',null);
     if(flag!==settings().lastPlanChange){
       DB.set('planAgeNotified',settings().lastPlanChange);
-      sendEmail(`Sono passate ${w} settimane dalla tua ultima scheda`);
+      sendEmail('planAge');
       maybeNotify();
     }
   }
@@ -1669,11 +1727,15 @@ function init(){
   Media.load().then(()=>{ // re-render current view once images resolve
     const act=$('#tabbar button.active'); if(act) go(act.dataset.tab);
   });
-  curDayIdx = recommendedDayIdx(); // open the smart-recommended day
-  go('scheda');
+  curDayIdx = recommendedDayIdx();
+  go('scheda');           // render di base (coperto dal gate se serve)
   autoCheckPlanAge();
   trainingReminder();
-  if(!DB.get('onboarded', false)) window.startOnboarding(); // primo accesso: intervista
-  Cloud.init().catch(()=>{}); // se configurato, ripristina sessione e sincronizza
+  if(Cloud.config()){
+    if(!localStorage.getItem('guestMode')) showAuthGate(); // mostra subito l'accesso
+    Cloud.init().catch(()=>{});
+  } else {
+    afterReady();         // nessun cloud: comportamento locale
+  }
 }
 init();
