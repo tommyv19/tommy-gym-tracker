@@ -539,12 +539,12 @@ VIEWS.scheda = function(){
   // smart recommendation HERO
   const isTrainingDay = getTrainingDays().includes(new Date().getDay());
   if (doneToday){
-    h += `<div class="hero done">
+    h += `<div class="hero completed">
       <div class="badge-day">✅ COMPLETATO OGGI</div>
       <h2>Giorno ${doneToday.dayType} fatto!</h2>
       <div class="sub">Prossimo consigliato: Giorno ${recDay.type} — ${esc(recDay.name)} · ${nextTrainingDayName()}</div></div>`;
   } else if (!isTrainingDay){
-    h += `<div class="hero rest">
+    h += `<div class="hero restday">
       <div class="badge-day">🛌 RIPOSO</div>
       <h2>Giorno di riposo</h2>
       <div class="sub">Prossimo allenamento: ${nextTrainingDayName()} · Giorno ${recDay.type}.</div>

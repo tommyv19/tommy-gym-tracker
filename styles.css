@@ -95,8 +95,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--text-2); }
 .hero.B { background:linear-gradient(135deg,#46a0ff,#1A6FBF); }
 .hero.C { background:linear-gradient(135deg,#48d989,#2EAD6B); }
 .hero.D { background:linear-gradient(135deg,#b362e6,#8B2FC9); }
-.hero.rest { background:linear-gradient(135deg,#8a93a3,#5c6473); }
-.hero.done { background:linear-gradient(135deg,#43d684,#239e5b); }
+.hero.restday { background:linear-gradient(135deg,#8a93a3,#5c6473); }
+.hero.completed { background:linear-gradient(135deg,#43d684,#239e5b); }
 
 /* ===== Category round icons ===== */
 .catgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px 8px; margin-bottom:16px; }
